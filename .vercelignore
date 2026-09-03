@@ -1,0 +1,8 @@
+.git
+.local-data
+.env*
+__pycache__
+scraped
+tests
+test-results
+public

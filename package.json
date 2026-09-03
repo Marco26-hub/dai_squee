@@ -1,0 +1,12 @@
+{
+  "name": "dai-squee",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node --check site.js && node --check admin.js",
+    "test": "python3 -m unittest discover -s tests -v"
+  },
+  "engines": { "node": ">=20" }
+}

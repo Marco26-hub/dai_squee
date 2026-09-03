@@ -1,0 +1,9 @@
+.local-data/
+.env*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+test-results/
+public/
+.vercel
