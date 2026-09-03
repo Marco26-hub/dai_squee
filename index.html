@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#17231f" />
+    <meta name="description" content="Dai Squee, locazione turistica premium a Possagno: tre appartamenti indipendenti vicino al Tempio del Canova, prenotazione diretta e portali Booking, Airbnb e Vrbo." />
+    <title>Dai Squee | Locazione Turistica Premium a Possagno</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,500&amp;family=Inter:wght@400;450;500;600;700;800&amp;display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Vai al contenuto</a>
+
+    <header class="site-header" id="siteHeader">
+      <a class="brand" href="#home" aria-label="Dai Squee home">
+        <img src="assets/images/logo-bianco.png" alt="" />
+        <span><strong>DAI SQUEE</strong><small>Possagno</small></span>
+      </a>
+      <nav class="desktop-nav" aria-label="Navigazione principale">
+        <a href="#appartamenti">Appartamenti</a>
+        <a href="#prenota">Prenota</a>
+        <a href="#servizi">Servizi</a>
+        <a href="#territorio">Territorio</a>
+        <a href="#contatti">Contatti</a>
+      </nav>
+      <div class="header-actions">
+        <a class="admin-link" href="#portali">Portali</a>
+        <button class="header-book" type="button" data-open-booking>Prenota diretto</button>
+        <button class="menu-button" id="menuButton" type="button" aria-label="Apri menu" aria-expanded="false"><span></span><span></span></button>
+      </div>
+    </header>
+
+    <div class="mobile-menu" id="mobileMenu" aria-hidden="true">
+      <nav>
+        <a href="#appartamenti">Appartamenti</a>
+        <a href="#prenota">Prenota</a>
+        <a href="#servizi">Servizi</a>
+        <a href="#territorio">Territorio</a>
+        <a href="#contatti">Contatti</a>
+        <button type="button" data-open-booking>Verifica disponibilita</button>
+      </nav>
+      <p>Viale A. Canova 51 · Possagno</p>
+    </div>
+
+    <main id="main">
+      <section class="hero" id="home" aria-label="Dai Squee Possagno">
+        <img src="assets/images/possagno-home.jpg" alt="Veduta di Possagno e del Tempio del Canova" />
+        <div class="hero-shade"></div>
+        <div class="hero-content reveal">
+          <p class="eyebrow light">Locazione turistica · 026061-LOC-00007</p>
+          <h1>Dai Squee<br /><em>Possagno</em></h1>
+          <p class="hero-copy">Tre appartamenti indipendenti nel cuore della terra del Canova, tra arte, natura, Prosecco, Dolomiti e Venezia.</p>
+          <button class="discover-link" type="button" data-open-booking>Prenota direttamente <span>↗</span></button>
+        </div>
+        <div class="hero-note"><span>51</span><p>Viale A. Canova<br /><small>31054 Possagno TV</small></p></div>
+      </section>
+
+      <section class="booking-bar" id="prenota" aria-label="Ricerca disponibilita">
+        <form id="quickSearch">
+          <label><span>Appartamento</span><select id="stayType"><option>Tutti gli appartamenti</option><option>Suite Max</option><option>Michele</option><option>Rosa e Romeo</option></select></label>
+          <label><span>Canale</span><select id="bookingChannel"><option>Prenotazione diretta</option><option>Booking.com</option><option>Airbnb</option><option>Vrbo</option></select></label>
+          <label><span>Arrivo</span><input id="checkin" type="date" required /></label>
+          <label><span>Partenza</span><input id="checkout" type="date" required /></label>
+          <label><span>Ospiti</span><select id="guests"><option>1 ospite</option><option selected>2 ospiti</option><option>3 ospiti</option><option>4 ospiti</option></select></label>
+          <button type="submit">Verifica disponibilita <span>→</span></button>
+        </form>
+      </section>
+
+      <section class="booking-system">
+        <div class="booking-system-copy reveal">
+          <p class="eyebrow">Prenotazione diretta</p>
+          <h2>Prima scegliete casa. Poi scegliete il canale.</h2>
+          <p>Il nuovo sito mette al centro la richiesta diretta, con contatto immediato e condizioni personalizzate. I portali restano sempre raggiungibili per chi preferisce prenotare da Booking.com, Airbnb o Vrbo.</p>
+        </div>
+        <div class="booking-engine reveal">
+          <div class="engine-panel"><span>01</span><strong>Migliore dialogo</strong><p>Richiesta rapida con date, ospiti e preferenze prima di confermare.</p></div>
+          <div class="engine-panel"><span>02</span><strong>Zero passaggi inutili</strong><p>Telefono, email e WhatsApp sono visibili in ogni momento.</p></div>
+          <div class="engine-panel"><span>03</span><strong>Portali collegati</strong><p>Booking.com, Airbnb e Vrbo restano integrati nella scheda canali.</p></div>
+        </div>
+        <div class="portal-cards reveal" id="portali">
+          <a href="https://www.booking.com/" target="_blank" rel="noopener"><strong>Booking.com</strong><span>Apri il portale</span></a>
+          <a href="https://www.airbnb.it/" target="_blank" rel="noopener"><strong>Airbnb</strong><span>Apri il portale</span></a>
+          <a href="https://www.vrbo.com/" target="_blank" rel="noopener"><strong>Vrbo</strong><span>Apri il portale</span></a>
+        </div>
+      </section>
+
+      <section class="manifesto">
+        <p class="section-index">D / 01</p>
+        <div class="manifesto-copy reveal">
+          <p class="eyebrow">Arte, semplicità, sostenibilità</p>
+          <h2>Un soggiorno raccolto,<br />a pochi passi dal <em>Tempio del Canova.</em></h2>
+          <div class="manifesto-detail">
+            <p>Dai Squee nasce nel cuore di Possagno per offrire una forma di ospitalità semplice, curata e vicina al territorio.</p>
+            <p>La posizione permette di vivere il relax della Pedemontana Veneta con collegamenti naturali verso Venezia, le Dolomiti e le colline del Prosecco.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="residences" id="appartamenti">
+        <header class="section-header reveal">
+          <div><p class="eyebrow">I nostri appartamenti</p><h2>Tre spazi indipendenti,<br /><em>moderni e ricercati.</em></h2></div>
+          <p>Ogni appartamento dispone di cucina attrezzata, letto king size, divano letto, bagno privato, ingresso indipendente, parcheggio, aria condizionata, TV satellitare e Wi-Fi gratuito.</p>
+        </header>
+        <div class="residence-grid">
+          <article class="residence-card large reveal">
+            <div class="card-image"><img src="assets/images/suite-max-real.jpg" alt="Camera dell'Appartamento Suite Max" loading="lazy" /><span class="card-number">01</span><span class="availability">Prenota diretto</span></div>
+            <div class="card-content"><div><p>Dai Squee · Possagno</p><h3>Appartamento Suite Max</h3></div><ul><li>Letto king size</li><li>Cucina attrezzata</li><li>Ingresso indipendente</li></ul><button type="button" data-property="Suite Max">Richiedi <span>↗</span></button></div>
+          </article>
+          <article class="residence-card reveal">
+            <div class="card-image"><img src="assets/images/michele-real.jpg" alt="Camera dell'Appartamento Michele" loading="lazy" /><span class="card-number">02</span></div>
+            <div class="card-content"><div><p>Dai Squee · Possagno</p><h3>Appartamento Michele</h3></div><ul><li>Bagno privato</li><li>Wi-Fi gratuito</li><li>Parcheggio</li></ul><button type="button" data-property="Michele">Richiedi <span>↗</span></button></div>
+          </article>
+          <article class="residence-card reveal">
+            <div class="card-image"><img src="assets/images/rosa-romeo-real.jpg" alt="Camera dell'Appartamento Rosa e Romeo" loading="lazy" /><span class="card-number">03</span></div>
+            <div class="card-content"><div><p>Dai Squee · Possagno</p><h3>Rosa e Romeo</h3></div><ul><li>Aria condizionata</li><li>TV satellitare</li><li>Solarium</li></ul><button type="button" data-property="Rosa e Romeo">Richiedi <span>↗</span></button></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="services" id="servizi">
+        <header class="services-heading reveal">
+          <p class="eyebrow light">Servizi inclusi</p>
+          <h2>Comfort essenziale,<br /><em>cura contemporanea.</em></h2>
+          <p>Tutto ciò che serve per un soggiorno autonomo, comodo e senza frizioni.</p>
+        </header>
+        <div class="service-list">
+          <article class="service-item reveal"><span>01</span><h3>Parcheggio privato</h3><p>Comodo per visitare Possagno, Asolo, Bassano e la Pedemontana.</p><button type="button" data-service="Parcheggio privato">+</button></article>
+          <article class="service-item reveal"><span>02</span><h3>Wi-Fi gratuito</h3><p>Connessione disponibile negli appartamenti per viaggio, lavoro e relax.</p><button type="button" data-service="Wi-Fi gratuito">+</button></article>
+          <article class="service-item reveal"><span>03</span><h3>Aria condizionata</h3><p>Ambienti freschi e confortevoli nelle giornate più calde.</p><button type="button" data-service="Aria condizionata">+</button></article>
+          <article class="service-item reveal"><span>04</span><h3>Giardino e solarium</h3><p>Uno spazio esterno per rallentare dopo una giornata nel territorio.</p><button type="button" data-service="Giardino e solarium">+</button></article>
+          <article class="service-item reveal"><span>05</span><h3>TV satellitare</h3><p>Intrattenimento semplice e immediato in ogni appartamento.</p><button type="button" data-service="TV satellitare">+</button></article>
+          <article class="service-item reveal"><span>06</span><h3>Cucina attrezzata</h3><p>Libertà di organizzare colazioni, pranzi e cene con i propri tempi.</p><button type="button" data-service="Cucina attrezzata">+</button></article>
+        </div>
+      </section>
+
+      <section class="experience" id="territorio">
+        <div class="experience-visual reveal"><img src="assets/images/villa-barbaro-real.jpeg" alt="Villa storica nei dintorni di Possagno" loading="lazy" /><div class="image-stamp"><span>Canova</span><strong>Possagno</strong><small>Veneto</small></div></div>
+        <div class="experience-copy reveal">
+          <p class="eyebrow">Intorno a noi</p>
+          <h2>Arte, natura e colline<br />da vivere con <em>lentezza.</em></h2>
+          <p>Possagno è una base elegante e tranquilla per scoprire luoghi iconici e percorsi autentici.</p>
+          <ul>
+            <li><span>01</span><p><strong>Tempio del Canova</strong><small>A pochi metri dalla struttura.</small></p></li>
+            <li><span>02</span><p><strong>Venezia e Dolomiti</strong><small>Due direzioni perfette per gite giornaliere.</small></p></li>
+            <li><span>03</span><p><strong>Terra del Prosecco</strong><small>Colline, cantine e borghi storici.</small></p></li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="management" id="contatti">
+        <div class="management-copy reveal">
+          <p class="eyebrow">Contatti e canali</p>
+          <h2>Richiesta diretta o portale: tutto collegato.</h2>
+          <p>Per prenotazioni e informazioni: Viale A. Canova 51, 31054 Possagno (TV), tel. +39 349 4454604, tel. +39 347 8022486, info@daisquee.it.</p>
+          <a href="mailto:info@daisquee.it">Scrivi a Dai Squee <span>↗</span></a>
+        </div>
+        <div class="management-grid reveal">
+          <div><strong>Diretto</strong><span>Modulo, telefono ed email sempre visibili</span></div>
+          <div><strong>Booking.com</strong><span>Collegamento al portale di prenotazione</span></div>
+          <div><strong>Airbnb</strong><span>Canale OTA per richieste e recensioni</span></div>
+          <div><strong>Vrbo</strong><span>Portale dedicato a case vacanza</span></div>
+        </div>
+      </section>
+
+      <section class="direct-booking">
+        <div class="direct-inner reveal">
+          <p class="eyebrow light">Book direct</p>
+          <h2>Il vostro soggiorno<br /><em>inizia da Possagno.</em></h2>
+          <p>Richiedete disponibilità, appartamento preferito e dettagli del viaggio. Dai Squee vi risponde con una proposta chiara.</p>
+          <button type="button" data-open-booking>Verifica disponibilita <span>→</span></button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-brand"><a class="brand" href="#home"><img src="assets/images/logo-bianco.png" alt="" /><span><strong>DAI SQUEE</strong><small>Possagno</small></span></a><p>Locazione Turistica<br />026061-LOC-00007</p></div>
+      <div class="footer-col"><small>Esplora</small><a href="#appartamenti">Appartamenti</a><a href="#servizi">Servizi</a><a href="#territorio">Territorio</a><a href="#contatti">Contatti</a></div>
+      <div class="footer-col"><small>Contatti</small><a href="tel:+393494454604">+39 349 4454604</a><a href="tel:+393478022486">+39 347 8022486</a><a href="mailto:info@daisquee.it">info@daisquee.it</a></div>
+      <div class="footer-col"><small>Portali</small><a href="https://www.booking.com/" target="_blank" rel="noopener">Booking.com</a><a href="https://www.airbnb.it/" target="_blank" rel="noopener">Airbnb.it</a><a href="https://www.vrbo.com/" target="_blank" rel="noopener">Vrbo.com</a></div>
+      <div class="footer-bottom"><span>© 2026 Dai Squee</span><a href="#">Privacy</a><a href="#">Cookie</a><span>Viale A. Canova 51 · 31054 Possagno (TV)</span></div>
+    </footer>
+
+    <button class="concierge-fab" type="button" data-open-booking><span>✦</span><p><small>Prenota diretto</small>Dai Squee</p></button>
+
+    <div class="booking-modal" id="bookingModal" hidden>
+      <div class="modal-backdrop" data-close-modal></div>
+      <div class="booking-panel" role="dialog" aria-modal="true" aria-labelledby="bookingTitle">
+        <button class="modal-close" type="button" data-close-modal aria-label="Chiudi">×</button>
+        <div class="booking-intro"><p class="eyebrow light">Richiesta diretta</p><h2 id="bookingTitle">Verifica disponibilita</h2><p>Inviate date e preferenze. Vi risponderemo con la proposta più adatta.</p></div>
+        <form id="bookingForm">
+          <div class="form-row"><label><span>Appartamento</span><select id="modalStayType"><option>Tutti gli appartamenti</option><option>Suite Max</option><option>Michele</option><option>Rosa e Romeo</option></select></label><label><span>Canale preferito</span><select id="modalChannel"><option>Prenotazione diretta</option><option>Booking.com</option><option>Airbnb</option><option>Vrbo</option></select></label></div>
+          <div class="form-row"><label><span>Arrivo</span><input id="modalCheckin" type="date" required /></label><label><span>Partenza</span><input id="modalCheckout" type="date" required /></label></div>
+          <div class="form-row"><label><span>Ospiti</span><select><option>1 ospite</option><option selected>2 ospiti</option><option>3 ospiti</option><option>4 ospiti</option></select></label><label><span>Telefono</span><input type="tel" placeholder="+39" /></label></div>
+          <label><span>Email</span><input type="email" placeholder="nome@email.com" required /></label>
+          <label><span>Messaggio</span><textarea rows="3" placeholder="Appartamento preferito, orario di arrivo, richieste speciali..."></textarea></label>
+          <button type="submit">Richiedi la proposta <span>→</span></button>
+          <small>Nessun pagamento online in questa demo. La richiesta arriva direttamente a Dai Squee.</small>
+        </form>
+      </div>
+    </div>
+
+    <div class="service-modal" id="serviceModal" hidden>
+      <div class="modal-backdrop" data-close-service></div>
+      <div class="service-panel" role="dialog" aria-modal="true" aria-labelledby="serviceTitle">
+        <button class="modal-close" type="button" data-close-service aria-label="Chiudi">×</button>
+        <p class="eyebrow">Dai Squee</p><h2 id="serviceTitle">Servizio incluso</h2><p>Il servizio è pensato per rendere il soggiorno autonomo, semplice e confortevole.</p><a href="mailto:info@daisquee.it">Richiedi informazioni <span>→</span></a>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"><span>✓</span><p><strong>Richiesta ricevuta</strong><small>Dai Squee vi contatterà a breve.</small></p></div>
+    <script src="site.js"></script>
+  </body>
+</html>

@@ -1,0 +1,139 @@
+[
+  {
+    "url": "https://www.daisquee.it/amici-partners/",
+    "slug": "amici-partners",
+    "text_file": "daisque-it/scraped/amici-partners.txt",
+    "images": [
+      "daisque-it/assets/images/scraped/amici-partners-Schermata-2022-02-02-alle-16.34.57.png",
+      "daisque-it/assets/images/scraped/amici-partners-elicottero_ok.png",
+      "daisque-it/assets/images/scraped/amici-partners-PHOTO-2021-11-24-14-56-13_3.jpg",
+      "daisque-it/assets/images/scraped/amici-partners-parapendio_ok.png",
+      "daisque-it/assets/images/scraped/amici-partners-rafting_ok.png"
+    ]
+  },
+  {
+    "url": "https://www.daisquee.it/chi-siamo/",
+    "slug": "chi-siamo",
+    "text_file": "daisque-it/scraped/chi-siamo.txt",
+    "images": [
+      "daisque-it/assets/images/scraped/amici-partners-Schermata-2022-02-02-alle-16.34.57.png",
+      "daisque-it/assets/images/scraped/chi-siamo-MONOLOCALE.jpg"
+    ]
+  },
+  {
+    "url": "https://www.daisquee.it/contatti/",
+    "slug": "contatti",
+    "text_file": "daisque-it/scraped/contatti.txt",
+    "images": [
+      "daisque-it/assets/images/scraped/amici-partners-Schermata-2022-02-02-alle-16.34.57.png"
+    ]
+  },
+  {
+    "url": "https://www.daisquee.it/intorno-a-noi/",
+    "slug": "intorno-a-noi",
+    "text_file": "daisque-it/scraped/intorno-a-noi.txt",
+    "images": [
+      "daisque-it/assets/images/scraped/intorno-a-noi-gallery1.png",
+      "daisque-it/assets/images/scraped/intorno-a-noi-gallery2.png",
+      "daisque-it/assets/images/scraped/intorno-a-noi-gallery3.png",
+      "daisque-it/assets/images/scraped/intorno-a-noi-gallery5.png",
+      "daisque-it/assets/images/scraped/amici-partners-Schermata-2022-02-02-alle-16.34.57.png",
+      "daisque-it/assets/images/scraped/intorno-a-noi-brion-e-scarpa.jpeg",
+      "daisque-it/assets/images/scraped/intorno-a-noi-villa-barbaro.jpeg",
+      "daisque-it/assets/images/scraped/intorno-a-noi-prosecco_ok.png",
+      "daisque-it/assets/images/scraped/intorno-a-noi-trekking_ok-1.png"
+    ]
+  },
+  {
+    "url": "https://www.daisquee.it/privacy_cookie_policy",
+    "slug": "privacy_cookie_policy",
+    "text_file": "daisque-it/scraped/privacy_cookie_policy.txt",
+    "images": [
+      "daisque-it/assets/images/scraped/amici-partners-Schermata-2022-02-02-alle-16.34.57.png"
+    ]
+  },
+  {
+    "url": "https://www.daisquee.it/rooms/max/",
+    "slug": "rooms--max",
+    "text_file": "daisque-it/scraped/rooms--max.txt",
+    "images": [
+      "daisque-it/assets/images/scraped/rooms--max-DSC_0237-scaled.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-ROSA-E-ROMEO-BED-ROOM.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-DSC_0160-scaled.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-vista_ok.png",
+      "daisque-it/assets/images/scraped/rooms--max-DSC_0152-scaled.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-DSC_0173-scaled.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-BAGNO-SUITE.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-CAMERA-SUITE-MAX.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-CUCINA-SUITE.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-DETTAGLI.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-APP-MICHELE.jpg",
+      "daisque-it/assets/images/scraped/amici-partners-Schermata-2022-02-02-alle-16.34.57.png"
+    ]
+  },
+  {
+    "url": "https://www.daisquee.it/rooms/michele/",
+    "slug": "rooms--michele",
+    "text_file": "daisque-it/scraped/rooms--michele.txt",
+    "images": [
+      "daisque-it/assets/images/scraped/rooms--michele-DSC_0278-scaled.jpg",
+      "daisque-it/assets/images/scraped/rooms--michele-DSC_0284-scaled.jpg",
+      "daisque-it/assets/images/scraped/rooms--michele-DSC_0315-scaled.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-ROSA-E-ROMEO-BED-ROOM.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-DSC_0173-scaled.jpg",
+      "daisque-it/assets/images/scraped/rooms--michele-APP-MICHELE-CUCINA.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-APP-MICHELE.jpg",
+      "daisque-it/assets/images/scraped/rooms--michele-BAGNO-DISABILI.jpg",
+      "daisque-it/assets/images/scraped/rooms--michele-CAMERA-3.jpg",
+      "daisque-it/assets/images/scraped/rooms--michele-CAMERA-4.jpg",
+      "daisque-it/assets/images/scraped/rooms--michele-CUCINA-2.jpg",
+      "daisque-it/assets/images/scraped/amici-partners-Schermata-2022-02-02-alle-16.34.57.png"
+    ]
+  },
+  {
+    "url": "https://www.daisquee.it/rooms/rosa-e-romeo/",
+    "slug": "rooms--rosa-e-romeo",
+    "text_file": "daisque-it/scraped/rooms--rosa-e-romeo.txt",
+    "images": [
+      "daisque-it/assets/images/scraped/rooms--rosa-e-romeo-DSC_0350-scaled.jpg",
+      "daisque-it/assets/images/scraped/rooms--rosa-e-romeo-DSC_0365-scaled.jpg",
+      "daisque-it/assets/images/scraped/rooms--rosa-e-romeo-DSC_0374.png",
+      "daisque-it/assets/images/scraped/rooms--max-ROSA-E-ROMEO-BED-ROOM.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-DSC_0173-scaled.jpg",
+      "daisque-it/assets/images/scraped/rooms--max-APP-MICHELE.jpg",
+      "daisque-it/assets/images/scraped/rooms--michele-BAGNO-DISABILI.jpg",
+      "daisque-it/assets/images/scraped/rooms--rosa-e-romeo-CAMERA-ROSA-E-ROMEO.jpg",
+      "daisque-it/assets/images/scraped/rooms--rosa-e-romeo-ROSA-E-ROMEO-KITCHEN.jpg",
+      "daisque-it/assets/images/scraped/amici-partners-Schermata-2022-02-02-alle-16.34.57.png",
+      "daisque-it/assets/images/scraped/rooms--rosa-e-romeo-ZONA-GIORNO.jpg"
+    ]
+  },
+  {
+    "url": "https://www.daisquee.it/termini-e-condizioni/",
+    "slug": "termini-e-condizioni",
+    "text_file": "daisque-it/scraped/termini-e-condizioni.txt",
+    "images": [
+      "daisque-it/assets/images/scraped/amici-partners-Schermata-2022-02-02-alle-16.34.57.png"
+    ]
+  },
+  {
+    "url": "https://www.daisquee.it/",
+    "slug": "home",
+    "text_file": "daisque-it/scraped/home.txt",
+    "images": [
+      "daisque-it/assets/images/scraped/home-DSC_0414-scaled.jpg",
+      "daisque-it/assets/images/scraped/amici-partners-Schermata-2022-02-02-alle-16.34.57.png",
+      "daisque-it/assets/images/scraped/home-camera_max.png",
+      "daisque-it/assets/images/scraped/home-camera_rosa.png",
+      "daisque-it/assets/images/scraped/home-michele.png"
+    ]
+  },
+  {
+    "url": "https://www.daisquee.it/my-account/",
+    "slug": "my-account",
+    "text_file": "daisque-it/scraped/my-account.txt",
+    "images": [
+      "daisque-it/assets/images/scraped/amici-partners-Schermata-2022-02-02-alle-16.34.57.png"
+    ]
+  }
+]
