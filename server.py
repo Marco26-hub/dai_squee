@@ -3,6 +3,7 @@ import base64
 import hashlib
 import hmac
 import json
+from decimal import Decimal, ROUND_HALF_UP
 import mimetypes
 import os
 from pathlib import Path
@@ -30,7 +31,10 @@ DEFAULTS = {
     "stripe_secret": "", "stripe_webhook_secret": "", "smtp_host": "", "smtp_port": 587,
     "smtp_user": "", "smtp_password": "", "smtp_from": "", "smtp_mode": "starttls",
     "booking_url": "https://www.booking.com/", "airbnb_url": "https://www.airbnb.it/",
-    "vrbo_url": "https://www.vrbo.com/", "rates": {room: None for room in ROOMS}
+    "vrbo_url": "https://www.vrbo.com/", "rates": {room: None for room in ROOMS},
+    "direct_enabled": False, "payment_methods": [], "booking_terms": "",
+    "bank_iban": "", "bank_holder": "", "bank_instructions": "",
+    "capacities": {"Suite Max": 4, "Michele": 2, "Rosa e Romeo": 2}
 }
 ATTEMPTS = {}
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -90,6 +94,8 @@ def init():
         CREATE TABLE IF NOT EXISTS stripe_events (id TEXT PRIMARY KEY, created_at TEXT);
         CREATE TABLE IF NOT EXISTS rate_limits (bucket TEXT, occurred REAL);
         CREATE TABLE IF NOT EXISTS checkout_attempts (booking_id TEXT PRIMARY KEY, generation INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS direct_details (booking_id TEXT PRIMARY KEY, method TEXT, terms TEXT, access_token TEXT UNIQUE, expires_at INTEGER, email_attempted INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS apartment_photos (id TEXT PRIMARY KEY, apartment TEXT, role TEXT, caption TEXT, mime TEXT, data TEXT, created_at TEXT);
         """)
         for key, value in DEFAULTS.items():
             conn.execute("INSERT INTO settings VALUES (?,?) ON CONFLICT(key) DO NOTHING", (key, json.dumps(value)))
@@ -119,6 +125,87 @@ def booking(conn, booking_id):
     return dict(row)
 def overlap(conn, room, checkin, checkout, exclude=""):
     return conn.execute("SELECT id FROM bookings WHERE apartment=? AND id!=? AND status IN ('confirmed','blocked') AND checkin<? AND checkout>? LIMIT 1", (room, exclude, checkout, checkin)).fetchone()
+
+def direct_quote(payload, conf):
+    room, arrival, departure, guests = validate_stay(payload)
+    if room not in ROOMS:
+        raise ApiError(400, "Selezionare un appartamento specifico.")
+    if guests > conf["capacities"][room]:
+        raise ApiError(400, "Numero ospiti superiore alla capienza configurata per questo appartamento.")
+    rate = conf["rates"].get(room)
+    if not conf["direct_enabled"] or not rate or not conf["booking_terms"].strip():
+        raise ApiError(503, "Prenotazione immediata non disponibile per questo appartamento. Contattateci per una proposta.")
+    methods = list(conf["payment_methods"])
+    if not all(conf[k] for k in ("stripe_secret", "stripe_webhook_secret", "site_url")):
+        methods = [m for m in methods if m != "card"]
+    if not conf["bank_iban"] or not conf["bank_holder"] or not conf["bank_instructions"]:
+        methods = [m for m in methods if m != "bank"]
+    if not methods:
+        raise ApiError(503, "Modalità di pagamento non ancora disponibili. Contattate la struttura.")
+    nights = (date.fromisoformat(departure)-date.fromisoformat(arrival)).days
+    amount = int((Decimal(str(rate))*100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))*nights
+    return {"apartment":room,"checkin":arrival,"checkout":departure,"guests":guests,"nights":nights,"amount_cents":amount,"methods":methods,"terms":conf["booking_terms"],"bank_iban":conf["bank_iban"] if "bank" in methods else "","bank_holder":conf["bank_holder"] if "bank" in methods else "","bank_instructions":conf["bank_instructions"] if "bank" in methods else ""}
+
+def quote_signature(quote, expires, conf):
+    message = json.dumps([quote, expires], sort_keys=True, separators=(",", ":"))
+    return hmac.new(conf["password_hash"].encode(),message.encode(),hashlib.sha256).hexdigest()
+
+def direct_result(bid):
+    with db() as conn:
+        row = booking(conn,bid)
+        detail = dict(conn.execute("SELECT * FROM direct_details WHERE booking_id=?",(bid,)).fetchone())
+    result = {"reference":bid,"apartment":row["apartment"],"checkin":row["checkin"],"checkout":row["checkout"],"amount_cents":row["amount_cents"],"method":detail["method"],"status":row["status"],"paid":bool(row["paid_at"]),"terms":json.loads(detail["terms"]),"access_token":detail["access_token"],"url":row["checkout_url"] if not row["paid_at"] and row["status"]=="confirmed" else None,"email_error":row["email_error"]}
+    return result
+
+def direct_checkout(bid):
+    conf = settings()
+    with db() as conn:
+        row = booking(conn,bid)
+        detail = dict(conn.execute("SELECT * FROM direct_details WHERE booking_id=?",(bid,)).fetchone())
+    if row["checkout_id"] and row["checkout_id"] != "creating":
+        return
+    if row["status"] != "confirmed":
+        raise ApiError(409,"Prenotazione annullata. Selezionare nuovamente le date.")
+    if detail["expires_at"] < time.time()+1805:
+        raise ApiError(409,"Sessione non completata. Contattate la struttura con il riferimento "+bid+" prima di riprovare.")
+    result = stripe_request("checkout/sessions", {
+        "mode":"payment", "payment_method_types[0]":"card", "locale":"it",
+        "client_reference_id":bid,"customer_email":row["email"],
+        "expires_at":detail["expires_at"],
+        "line_items[0][price_data][currency]":"eur",
+        "line_items[0][price_data][unit_amount]":row["amount_cents"],
+        "line_items[0][price_data][product_data][name]":"Dai Squee - "+row["apartment"],
+        "line_items[0][price_data][product_data][description]":row["checkin"]+" / "+row["checkout"],
+        "line_items[0][quantity]":1,"metadata[booking_id]":bid,
+        "success_url":conf["site_url"].rstrip("/")+"/prenota.html?receipt="+detail["access_token"],
+        "cancel_url":conf["site_url"].rstrip("/")+"/prenota.html?receipt="+detail["access_token"]
+    }, key="direct-"+bid)
+    with db() as conn:
+        conn.execute("UPDATE bookings SET checkout_id=?,checkout_url=? WHERE id=?",(result["id"],result["url"],bid))
+        audit(conn,bid,"Checkout carta diretto: date riservate fino a esito Stripe")
+
+def direct_email(bid):
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        detail = conn.execute("SELECT * FROM direct_details WHERE booking_id=?",(bid,)).fetchone()
+        if not detail or detail["email_attempted"]:
+            return
+        conn.execute("UPDATE direct_details SET email_attempted=1 WHERE booking_id=?",(bid,))
+        row = booking(conn,bid)
+    conf = settings()
+    terms = json.loads(detail["terms"])
+    content = "Prenotazione "+bid+"\n"+row["apartment"]+"\n"+row["checkin"]+" / "+row["checkout"]+"\nTotale EUR "+format(row["amount_cents"]/100,".2f")+"\nPagamento: "+{"arrival":"all'arrivo","bank":"bonifico","card":"carta verificata"}[detail["method"]]+"\n\n"+terms["terms"]
+    if detail["method"]=="bank":
+        content += "\n\n"+terms["bank_holder"]+"\nIBAN: "+terms["bank_iban"]+"\nCausale: "+bid+"\n"+terms["bank_instructions"]
+    try:
+        send_mail(row["email"],"Dai Squee - prenotazione "+bid,content)
+        with db() as conn:
+            conn.execute("UPDATE bookings SET email_error=NULL WHERE id=?",(bid,))
+            audit(conn,bid,"Conferma diretta accettata da SMTP")
+    except ApiError as error:
+        with db() as conn:
+            conn.execute("UPDATE bookings SET email_error=? WHERE id=?",(error.message,bid))
+            audit(conn,bid,"Invio conferma fallito o incerto: verificare prima di reinviare")
 class ApiError(Exception):
     def __init__(self, code, message):
         self.code, self.message = code, message
@@ -246,12 +333,12 @@ class Handler(SimpleHTTPRequestHandler):
                 raise ApiError(429, "Troppe richieste. Attendere e riprovare.")
             conn.execute("INSERT INTO rate_limits VALUES (?,?)",(key,time.time()))
     def do_GET(self):
-        self.handle_request()
+        self.dispatch_app_request()
     def do_POST(self):
-        self.handle_request()
+        self.dispatch_app_request()
     def do_PATCH(self):
-        self.handle_request()
-    def handle_request(self):
+        self.dispatch_app_request()
+    def dispatch_app_request(self):
         try:
             path = urlparse(self.path).path
             if path.startswith("/api/"):
@@ -298,6 +385,24 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
     def api(self, path):
         method = self.command
+        if path == "/api/apartment-photos" and method == "GET":
+            with db() as conn:
+                rows = [dict(r) for r in conn.execute("SELECT id,apartment,role,caption FROM apartment_photos ORDER BY created_at,id")]
+            return self.response(200,{"photos":rows})
+        image_match = re.fullmatch(r"/api/photos/([a-f0-9]{24})",path)
+        if image_match and method == "GET":
+            with db() as conn:
+                row = conn.execute("SELECT mime,data FROM apartment_photos WHERE id=?",(image_match.group(1),)).fetchone()
+            if not row:
+                raise ApiError(404,"Foto non trovata.")
+            body = base64.b64decode(row["data"])
+            self.send_response(200)
+            self.send_header("Content-Type",row["mime"])
+            self.send_header("Content-Length",str(len(body)))
+            self.send_header("Cache-Control","public, max-age=3600")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path == "/api/health" and method == "GET":
             return self.response(200, {"ok": True})
         if path == "/api/config" and method == "GET":
@@ -306,7 +411,65 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/availability" and method == "GET":
             with db() as conn:
                 rows = [dict(r) for r in conn.execute("SELECT apartment,checkin,checkout FROM bookings WHERE status IN ('confirmed','blocked') AND checkout>=?", (date.today().isoformat(),))]
-            return self.response(200, {"unavailable": rows})
+            return self.response(200, {"unavailable": rows,"updated_at":now(),"capacities":settings()["capacities"]})
+        if path == "/api/quote" and method == "POST":
+            conf = settings()
+            quote = direct_quote(self.payload(),conf)
+            with db() as conn:
+                if overlap(conn,quote["apartment"],quote["checkin"],quote["checkout"]):
+                    raise ApiError(409,"Il periodo selezionato non è disponibile.")
+            expires = int(time.time())+900
+            return self.response(200,{"quote":quote,"expires":expires,"signature":quote_signature(quote,expires,conf)})
+        if path == "/api/reservation" and method == "GET":
+            token = parse_qs(urlparse(self.path).query).get("token",[""])[0]
+            if not re.fullmatch(r"[A-Za-z0-9_-]{30,100}",token):
+                raise ApiError(404,"Prenotazione non trovata.")
+            with db() as conn:
+                row = conn.execute("SELECT booking_id FROM direct_details WHERE access_token=?",(token,)).fetchone()
+            if not row:
+                raise ApiError(404,"Prenotazione non trovata.")
+            return self.response(200,direct_result(row["booking_id"]))
+        if path == "/api/reserve" and method == "POST":
+            self.limited("direct",12,3600)
+            p = self.payload()
+            key = self.headers.get("Idempotency-Key", "")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{20,100}",key):
+                raise ApiError(400,"Identificativo richiesta non valido.")
+            with db() as conn:
+                existing = conn.execute("SELECT b.id FROM bookings b JOIN direct_details d ON d.booking_id=b.id WHERE request_key=?",(key,)).fetchone()
+            if existing:
+                bid = existing["id"]
+            else:
+                conf = settings()
+                quote = direct_quote(p,conf)
+                expires = p.get("expires")
+                signature = p.get("signature","")
+                if type(expires) is not int or expires < time.time() or expires > time.time()+901 or not isinstance(signature,str) or not hmac.compare_digest(signature,quote_signature(quote,expires,conf)):
+                    raise ApiError(409,"La proposta è scaduta o le condizioni sono cambiate. Verificare nuovamente il totale.")
+                payment_method = p.get("payment_method")
+                if payment_method not in quote["methods"] or p.get("consent") is not True or p.get("terms_consent") is not True:
+                    raise ApiError(400,"Selezionare il pagamento e accettare le condizioni.")
+                name,email,phone = text_value(p,"name",120,True),text_value(p,"email",254,True),text_value(p,"phone",40)
+                if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+",email):
+                    raise ApiError(400,"Email non valida.")
+                with db() as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    existing = conn.execute("SELECT id FROM bookings WHERE request_key=?",(key,)).fetchone()
+                    if existing:
+                        bid = existing["id"]
+                    else:
+                        if overlap(conn,quote["apartment"],quote["checkin"],quote["checkout"]):
+                            raise ApiError(409,"Queste date sono appena state occupate. Scegliere un altro periodo.")
+                        bid = "DS-"+secrets.token_hex(6).upper()
+                        conn.execute("INSERT INTO bookings(id,request_key,created_at,updated_at,name,email,phone,apartment,checkin,checkout,guests,channel,message,status,amount_cents,checkout_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(bid,key,now(),now(),name,email,phone,quote["apartment"],quote["checkin"],quote["checkout"],quote["guests"],"Diretto online",text_value(p,"message",2000),"confirmed",quote["amount_cents"],"creating" if payment_method=="card" else None))
+                        conn.execute("INSERT INTO direct_details(booking_id,method,terms,access_token,expires_at) VALUES (?,?,?,?,?)",(bid,payment_method,json.dumps(quote),secrets.token_urlsafe(32),int(time.time())+2400))
+                        audit(conn,bid,"Prenotazione diretta: "+payment_method+". Condizioni accettate e archiviate.")
+            result = direct_result(bid)
+            if result["method"]=="card" and not result["paid"] and result["status"]=="confirmed":
+                direct_checkout(bid)
+            elif result["status"]=="confirmed":
+                direct_email(bid)
+            return self.response(200,direct_result(bid))
         if path == "/api/bookings" and method == "POST":
             self.limited("booking", 12, 3600)
             p = self.payload()
@@ -342,7 +505,7 @@ class Handler(SimpleHTTPRequestHandler):
             with db() as conn:
                 conn.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
                 conn.execute("INSERT INTO sessions VALUES (?,?,?)", (hashlib.sha256(token.encode()).hexdigest(),time.time()+8*3600,csrf))
-            secure = "; Secure" if settings()["site_url"].startswith("https://") else ""
+            secure = "; Secure" if os.environ.get("VERCEL") or settings()["site_url"].startswith("https://") else ""
             return self.response(200, {"csrf":csrf}, "daisquee_session="+token+"; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800"+secure)
         if path == "/api/stripe/webhook" and method == "POST":
             return self.webhook()
@@ -357,6 +520,54 @@ class Handler(SimpleHTTPRequestHandler):
             return self.response(200, {"ok":True}, "daisquee_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
         if path == "/api/admin/settings":
             return self.manage_settings(method)
+        if path == "/api/admin/photos" and method == "GET":
+            with db() as conn:
+                rows = [dict(r) for r in conn.execute("SELECT id,apartment,role,caption FROM apartment_photos ORDER BY created_at,id")]
+            return self.response(200,{"photos":rows})
+        if path == "/api/admin/photos" and method == "POST":
+            p = self.payload()
+            room, role = p.get("apartment"), p.get("role")
+            caption = text_value(p,"caption",240,True)
+            if room not in ROOMS or role not in ("cover","gallery"):
+                raise ApiError(400,"Appartamento o tipo foto non valido.")
+            try:
+                data = base64.b64decode(p.get("image",""),validate=True)
+            except (ValueError,TypeError):
+                raise ApiError(400,"Immagine non valida.")
+            mime = "image/jpeg" if data.startswith(b"\xff\xd8\xff") else "image/png" if data.startswith(b"\x89PNG\r\n\x1a\n") else "image/webp" if data.startswith(b"RIFF") and data[8:12]==b"WEBP" else None
+            if not mime or not 100<len(data)<=3*1024*1024:
+                raise ApiError(400,"Caricare un'immagine JPG, PNG o WebP di massimo 3 MB.")
+            with db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                count = conn.execute("SELECT COUNT(*) AS count FROM apartment_photos WHERE apartment=?",(room,)).fetchone()["count"]
+                if count>=20:
+                    raise ApiError(400,"Massimo 20 foto per appartamento. Rimuovere una foto prima di caricarne altre.")
+                if role=="cover":
+                    conn.execute("UPDATE apartment_photos SET role='gallery' WHERE apartment=?",(room,))
+                pid = secrets.token_hex(12)
+                conn.execute("INSERT INTO apartment_photos VALUES (?,?,?,?,?,?,?)",(pid,room,role,caption,mime,base64.b64encode(data).decode(),now()))
+                audit(conn,None,"Foto caricata: "+room+" / "+pid)
+            return self.response(201,{"id":pid})
+        photo_match = re.fullmatch(r"/api/admin/photos/([a-f0-9]{24})",path)
+        if photo_match and method == "PATCH":
+            p = self.payload()
+            with db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute("SELECT * FROM apartment_photos WHERE id=?",(photo_match.group(1),)).fetchone()
+                if not row:
+                    raise ApiError(404,"Foto non trovata.")
+                if p.get("remove") is True:
+                    conn.execute("DELETE FROM apartment_photos WHERE id=?",(row["id"],))
+                else:
+                    caption = text_value(p,"caption",240,True) if "caption" in p else row["caption"]
+                    role = p.get("role",row["role"])
+                    if role not in ("cover","gallery"):
+                        raise ApiError(400,"Ruolo foto non valido.")
+                    if role=="cover":
+                        conn.execute("UPDATE apartment_photos SET role='gallery' WHERE apartment=?",(row["apartment"],))
+                    conn.execute("UPDATE apartment_photos SET caption=?,role=? WHERE id=?",(caption,role,row["id"]))
+                audit(conn,None,"Foto aggiornata: "+row["id"])
+            return self.response(200,{"ok":True})
         if path == "/api/admin/test-email" and method == "POST":
             conf = settings()
             send_mail(conf["email"], "Dai Squee - verifica email", "La configurazione email di Dai Squee funziona.")
@@ -364,7 +575,7 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/admin/bookings" and method == "GET":
             with db() as conn:
                 rows = []
-                for row in conn.execute("SELECT * FROM bookings ORDER BY created_at DESC"):
+                for row in conn.execute("SELECT b.*,d.method AS payment_method,d.terms AS accepted_terms FROM bookings b LEFT JOIN direct_details d ON d.booking_id=b.id ORDER BY b.created_at DESC"):
                     item = dict(row)
                     item["has_invoice"] = bool(item.pop("invoice_file"))
                     rows.append(item)
@@ -391,7 +602,7 @@ class Handler(SimpleHTTPRequestHandler):
                 conn.execute("INSERT INTO bookings(id,created_at,updated_at,name,email,phone,apartment,checkin,checkout,guests,channel,message) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",(bid,now(),now(),name,email,text_value(p,"phone",40),room,arrival,departure,guests,text_value(p,"channel",40),text_value(p,"message",2000)))
                 audit(conn,bid,"Prenotazione inserita manualmente dall'amministratore")
             return self.response(201,{"reference":bid})
-        match = re.fullmatch(r"/api/admin/bookings/(DS-[A-F0-9]{8}|BL-[A-F0-9]{8})(?:/(events|checkout|invoice|send-invoice|send-payment|send-confirmation|sync-payment|expire-payment))?", path)
+        match = re.fullmatch(r"/api/admin/bookings/(DS-[A-F0-9]{8,12}|BL-[A-F0-9]{8})(?:/(events|checkout|invoice|send-invoice|send-payment|send-confirmation|sync-payment|expire-payment|record-payment))?", path)
         if match:
             return self.manage_booking(match.group(1),match.group(2),method)
         raise ApiError(404, "Risorsa non trovata.")
@@ -406,7 +617,19 @@ class Handler(SimpleHTTPRequestHandler):
                 value = p[key]
                 if key in SECRETS and value == "":
                     continue
-                if key == "rates":
+                if key == "direct_enabled":
+                    if type(value) is not bool:
+                        raise ApiError(400,"Abilitazione prenotazioni non valida.")
+                elif key == "payment_methods":
+                    if not isinstance(value,list) or any(v not in ("arrival","card","bank") for v in value) or len(value)!=len(set(value)):
+                        raise ApiError(400,"Modalità di pagamento non valide.")
+                elif key == "capacities":
+                    if not isinstance(value,dict) or set(value)!=set(ROOMS) or any(type(v) is not int or not 1<=v<=4 for v in value.values()):
+                        raise ApiError(400,"Capienze non valide.")
+                elif key in ("booking_terms","bank_instructions"):
+                    if not isinstance(value,str) or len(value)>4000:
+                        raise ApiError(400,"Condizioni troppo lunghe.")
+                elif key == "rates":
                     if not isinstance(value, dict) or any(k not in ROOMS for k in value):
                         raise ApiError(400,"Tariffe non valide.")
                     if any(v is not None and (type(v) not in (int,float) or not 0 < v <= 10000) for v in value.values()):
@@ -425,6 +648,14 @@ class Handler(SimpleHTTPRequestHandler):
                 elif key == "stripe_secret" and value and not value.startswith(("sk_test_","sk_live_")):
                     raise ApiError(400,"Chiave Stripe non valida.")
                 updates[key] = value
+            merged = {**conf,**updates}
+            if merged["direct_enabled"]:
+                if not merged["payment_methods"] or not merged["booking_terms"].strip() or not any(merged["rates"].values()):
+                    raise ApiError(400,"Per attivare le prenotazioni: impostare almeno una tariffa, un pagamento e le condizioni complete.")
+                if "card" in merged["payment_methods"] and not all(merged[k] for k in ("stripe_secret","stripe_webhook_secret","site_url")):
+                    raise ApiError(400,"Per la carta configurare Stripe, webhook e dominio HTTPS.")
+                if "bank" in merged["payment_methods"] and not all(merged[k].strip() for k in ("bank_iban","bank_holder","bank_instructions")):
+                    raise ApiError(400,"Per il bonifico inserire IBAN, intestatario e istruzioni/scadenza.")
             new_password = p.get("new_password","")
             if new_password:
                 if not isinstance(new_password,str) or not 12 <= len(new_password) <= 128:
@@ -470,7 +701,7 @@ class Handler(SimpleHTTPRequestHandler):
                 arrival=p.get("checkin",row["checkin"])
                 departure=p.get("checkout",row["checkout"])
                 validate_stay({"apartment":room if room in ROOMS else "Suite Max","checkin":arrival,"checkout":departure,"guests":row["guests"]},True)
-                if row["checkout_id"] and (amount!=row["amount_cents"] or desired!=row["status"] or room!=row["apartment"] or arrival!=row["checkin"] or departure!=row["checkout"]):
+                if (row["checkout_id"] or row["paid_at"]) and (amount!=row["amount_cents"] or desired!=row["status"] or room!=row["apartment"] or arrival!=row["checkin"] or departure!=row["checkout"]):
                     raise ApiError(409,"Esiste un pagamento collegato: gestire annullamento o rimborso in Stripe prima di modificare la prenotazione. Le note restano modificabili.")
                 if desired in ("confirmed","blocked") and overlap(conn,room,arrival,departure,bid):
                     raise ApiError(409,"Date occupate: impossibile confermare una sovrapposizione.")
@@ -480,6 +711,19 @@ class Handler(SimpleHTTPRequestHandler):
             return self.response(200,{"ok":True})
         with db() as conn:
             row = booking(conn,bid)
+        if action=="record-payment" and method=="POST":
+            p = self.payload()
+            reference = text_value(p,"reference",200,True)
+            with db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = booking(conn,bid)
+                detail = conn.execute("SELECT method FROM direct_details WHERE booking_id=?",(bid,)).fetchone()
+                if row["checkout_id"] or row["status"]!="confirmed" or not row["amount_cents"] or not detail or detail["method"] not in ("arrival","bank"):
+                    raise ApiError(409,"Registrazione manuale ammessa solo per bonifico o pagamento all'arrivo confermati.")
+                if not row["paid_at"]:
+                    conn.execute("UPDATE bookings SET paid_at=?,payment_id=? WHERE id=?",(now(),"manual:"+reference,bid))
+                    audit(conn,bid,"Incasso verificato manualmente dal proprietario: "+reference)
+            return self.response(200,{"message":"Incasso registrato dal proprietario."})
         if action in ("sync-payment","expire-payment") and method=="POST":
             if not row["checkout_id"]:
                 raise ApiError(409,"Nessuna sessione Stripe collegata.")
@@ -497,6 +741,8 @@ class Handler(SimpleHTTPRequestHandler):
                 with db() as conn:
                     conn.execute("BEGIN IMMEDIATE")
                     conn.execute("UPDATE bookings SET checkout_id=NULL,checkout_url=NULL WHERE id=? AND paid_at IS NULL",(bid,))
+                    if conn.execute("SELECT 1 FROM direct_details WHERE booking_id=? AND method='card'",(bid,)).fetchone():
+                        conn.execute("UPDATE bookings SET status='cancelled' WHERE id=? AND paid_at IS NULL",(bid,))
                     conn.execute("INSERT INTO checkout_attempts VALUES (?,1) ON CONFLICT(booking_id) DO UPDATE SET generation=checkout_attempts.generation+1",(bid,))
                     audit(conn,bid,"Sessione Stripe scaduta; prenotazione nuovamente modificabile")
                 return self.response(200,{"message":"Link scaduto o disattivato. È possibile modificare la prenotazione."})
@@ -581,6 +827,10 @@ class Handler(SimpleHTTPRequestHandler):
             else:
                 if row["status"]!="confirmed":
                     raise ApiError(409,"Confermare prima la prenotazione.")
+                with db() as conn:
+                    direct = conn.execute("SELECT method FROM direct_details WHERE booking_id=?",(bid,)).fetchone()
+                if direct and direct["method"]=="card" and not row["paid_at"]:
+                    raise ApiError(409,"La prenotazione con carta attende un pagamento verificato.")
                 subject="Dai Squee - conferma soggiorno "+bid
                 content="Gentile "+row["name"]+",\n\nconfermiamo il soggiorno in "+row["apartment"]+" dal "+row["checkin"]+" al "+row["checkout"]+" per "+str(row["guests"])+" ospiti.\n\nPer orario di arrivo e informazioni: "+conf["phone"]+".\n\n"+conf["business_name"]
             try:
@@ -620,6 +870,7 @@ class Handler(SimpleHTTPRequestHandler):
             obj=event["data"]["object"]
         except (ValueError,KeyError,TypeError):
             raise ApiError(400,"Evento non valido.")
+        notify_bid = None
         with db() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if conn.execute("SELECT 1 FROM stripe_events WHERE id=?",(event_id,)).fetchone():
@@ -635,7 +886,17 @@ class Handler(SimpleHTTPRequestHandler):
                             raise ApiError(409,"Importo di pagamento non corrispondente.")
                         conn.execute("UPDATE bookings SET paid_at=?,payment_id=?,updated_at=? WHERE id=?", (row["paid_at"] or now(),obj.get("payment_intent"),now(),bid))
                         audit(conn,bid,"Pagamento verificato tramite webhook Stripe")
+                        notify_bid = bid
+            if event.get("type")=="checkout.session.expired" and obj.get("client_reference_id"):
+                bid = obj["client_reference_id"]
+                row = booking(conn,bid)
+                direct = conn.execute("SELECT 1 FROM direct_details WHERE booking_id=? AND method='card'",(bid,)).fetchone()
+                if direct and row["checkout_id"]==obj.get("id") and not row["paid_at"] and obj.get("status")=="expired":
+                    conn.execute("UPDATE bookings SET status='cancelled',updated_at=? WHERE id=?",(now(),bid))
+                    audit(conn,bid,"Checkout scaduto: date nuovamente disponibili")
             conn.execute("INSERT INTO stripe_events VALUES (?,?)",(event_id,now()))
+        if notify_bid:
+            direct_email(notify_bid)
         return self.response(200,{"received":True})
 
 if __name__=="__main__":

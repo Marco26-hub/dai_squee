@@ -2,7 +2,8 @@
 .local-data
 .env*
 __pycache__
-scraped
+/scraped
+.venv
 tests
 test-results
 public

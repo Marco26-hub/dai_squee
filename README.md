@@ -44,3 +44,23 @@ Portali: i link configurati sono semplici collegamenti. Le API Booking/Airbnb no
 Confermare tariffe, condizioni, eventuali oneri, documenti legali, dati identificativi e titolarità del dominio. Il sito usa contenuti e fotografie del sito originale; recensioni e servizi non verificati non vengono inventati.
 
 I test automatici usano dati temporanei e fornitori simulati. Non inviano email e non eseguono addebiti reali.
+
+## Prenotazione immediata e calendario
+
+`disponibilita.html` e `prenota.html` leggono la disponibilita dal medesimo database dell'admin, con aggiornamento ogni 30 secondi e controllo transazionale prima della conferma. Il checkout e' escluso dalle notti occupate. In caso di errore le date non vengono mostrate come disponibili per supposizione.
+
+La prenotazione immediata resta DISABILITATA finche' il proprietario non configura e abilita tariffe finali per notte, capienze, condizioni e pagamenti in Impostazioni. Le tariffe sono per appartamento, non per persona. Nessuna tariffa commerciale viene inventata. Non sono implementati prezzi stagionali, calcolo automatico dell'imposta di soggiorno o sconti: impostare prezzi comprensivi dei costi obbligatori e dichiarare correttamente eventuali imposte locali riscosse sul posto. Le condizioni vanno verificate dalla struttura prima dell'attivazione.
+
+- All'arrivo: prenotazione confermata, importo da riscuotere; incasso registrabile dall'admin con riferimento.
+- Bonifico: prenotazione confermata, coordinate e scadenza visibili al cliente. Incasso e cancellazione per mancato versamento sono verificati manualmente dal proprietario.
+- Carta: sessione Stripe ospitata, importo calcolato dal server e condizioni firmate. Le date restano riservate; il pagamento e' confermato solo dal webhook firmato o dalla verifica amministrativa Stripe. Aggiungere anche `checkout.session.expired` agli eventi webhook: libera le date solo dopo una scadenza verificata. Un esito di creazione incerto mantiene il blocco finche' viene riconciliato, per prevenire doppie prenotazioni.
+
+Il riepilogo privato si apre con un token casuale. Le email fallite rimangono visibili nell'admin; non viene dichiarato l'invio quando SMTP non e' configurato. Pagamenti reali e consegna email devono essere collaudati con i servizi del proprietario prima dell'attivazione.
+
+## Fotografie gestite
+
+La scheda Foto appartamenti consente caricamento, scelta copertina, modifica didascalia e rimozione. Le immagini sono persistenti in PostgreSQL, pubbliche solo tramite identificativo; modifiche riservate all'admin con CSRF. Limite: 20 foto per appartamento, 3 MB per immagine JPG/PNG/WebP. In assenza di una galleria personalizzata rimangono le fotografie statiche originali.
+
+`python3 scripts/import_original_photos.py` importa una sola volta 14 fotografie originali selezionate, terrazzo compreso. Non sovrascrive gallerie gia' personalizzate. Eseguire con le variabili del database desiderato; mai commettere `.env` o credenziali. I font sono ospitati localmente in `assets/fonts`, con le relative licenze OFL.
+
+Le capienze iniziali del calendario sono 4/2/2, coerenti con gli annunci Airbnb individuati. Il sito originario descrive anche 2+2 per Michele e Rosa e Romeo: il proprietario deve verificare la capienza autorizzata prima di modificarla nell'admin.

@@ -34,8 +34,10 @@ class BookingTest(unittest.TestCase):
         cls.temp.cleanup()
     def setUp(self):
         with server.db() as conn:
-            for table in ("bookings","events","stripe_events","sessions","rate_limits"):
+            for table in ("bookings","direct_details","apartment_photos","events","stripe_events","sessions","rate_limits"):
                 conn.execute("DELETE FROM "+table)
+            for key,value in server.DEFAULTS.items():
+                conn.execute("UPDATE settings SET value=? WHERE key=?",(json.dumps(value),key))
         self.cookie = ""
         self.csrf = ""
     def call(self,path,method="GET",payload=None,headers=None):
@@ -106,12 +108,102 @@ class BookingTest(unittest.TestCase):
         self.assertNotIn("stripe_secret",settings)
         self.assertNotIn("smtp_password",settings)
         self.assertTrue(settings["configured"]["stripe_secret"])
+    def test_photo_management_requires_admin(self):
+        payload={"apartment":"Suite Max","role":"cover","caption":"Terrazzo","image":base64.b64encode(b"\xff\xd8\xff"+b"0"*200).decode()}
+        self.assertEqual(self.call("/api/admin/photos","POST",payload)[0],401)
+        self.login()
+        code,result,_=self.call("/api/admin/photos","POST",payload)
+        self.assertEqual(code,201)
+        self.assertEqual(self.call("/api/photos/"+result["id"])[2]["Content-Type"],"image/jpeg")
+        public=self.call("/api/apartment-photos")[1]["photos"]
+        self.assertNotIn("data",public[0])
+        self.assertEqual(self.call("/api/admin/photos/"+result["id"],"PATCH",{"caption":"Vista"})[0],200)
+        self.assertEqual(self.call("/api/admin/photos/"+result["id"],"PATCH",{"remove":True})[0],200)
+        self.assertEqual(self.call("/api/photos/"+result["id"])[0],404)
+        payload["image"]=base64.b64encode(b"<svg>not allowed</svg>").decode()
+        self.assertEqual(self.call("/api/admin/photos","POST",payload)[0],400)
     def test_confirmation_conflict_atomic(self):
         _,a,_=self.create("overlap-one")
         _,b,_=self.create("overlap-two")
         self.login()
         self.assertEqual(self.call("/api/admin/bookings/"+a["reference"],"PATCH",{"status":"confirmed"})[0],200)
         self.assertEqual(self.call("/api/admin/bookings/"+b["reference"],"PATCH",{"status":"confirmed"})[0],409)
+    def configure_direct(self, methods=None):
+        self.login()
+        values={"direct_enabled":True,"rates":{r:100 for r in server.ROOMS},"payment_methods":methods or ["arrival"],"booking_terms":"Test conditions; all mandatory costs included.","bank_iban":"IT60X0542811101000000123456","bank_holder":"Test","bank_instructions":"Test bank deadline","stripe_secret":"sk_test_mock","stripe_webhook_secret":"whsec_test","site_url":"https://example.invalid"}
+        self.assertEqual(self.call("/api/admin/settings","PATCH",values)[0],200)
+    def quote(self,room="Suite Max"):
+        arrival=date.today()+timedelta(days=20)
+        stay={"apartment":room,"checkin":arrival.isoformat(),"checkout":(arrival+timedelta(days=3)).isoformat(),"guests":2}
+        code,result,_=self.call("/api/quote","POST",stay)
+        self.assertEqual(code,200)
+        return {**stay,"expires":result["expires"],"signature":result["signature"],"name":"Direct Test","email":"test@example.invalid","consent":True,"terms_consent":True,"payment_method":"arrival"}
+    def test_calendar_changes_follow_admin(self):
+        _,r,_=self.create()
+        self.assertEqual(self.call("/api/availability")[1]["unavailable"],[])
+        self.login()
+        path="/api/admin/bookings/"+r["reference"]
+        self.assertEqual(self.call(path,"PATCH",{"status":"confirmed"})[0],200)
+        rows=self.call("/api/availability")[1]["unavailable"]
+        self.assertEqual(len(rows),1)
+        self.assertEqual(set(rows[0]),{"apartment","checkin","checkout"})
+        shifted=(date.today()+timedelta(days=25)).isoformat()
+        self.assertEqual(self.call(path,"PATCH",{"checkout":shifted})[0],200)
+        self.assertEqual(self.call("/api/availability")[1]["unavailable"][0]["checkout"],shifted)
+        self.assertEqual(self.call(path,"PATCH",{"status":"cancelled"})[0],200)
+        self.assertEqual(self.call("/api/availability")[1]["unavailable"],[])
+    def test_direct_arrival_quote_integrity_and_idempotency(self):
+        self.configure_direct()
+        payload=self.quote()
+        bad={**payload,"checkout":(date.today()+timedelta(days=24)).isoformat()}
+        self.assertEqual(self.call("/api/reserve","POST",bad,{"Idempotency-Key":"direct-test-idempotency-0001"})[0],409)
+        payload["amount_cents"]=1
+        with patch("server.send_mail"):
+            code,r,_=self.call("/api/reserve","POST",payload,{"Idempotency-Key":"direct-test-idempotency-0001"})
+            self.assertEqual(code,200)
+            self.assertEqual(r["amount_cents"],30000)
+            self.assertEqual(r["status"],"confirmed")
+            self.assertFalse(r["paid"])
+            self.assertEqual(self.call("/api/reserve","POST",payload,{"Idempotency-Key":"direct-test-idempotency-0001"})[1]["reference"],r["reference"])
+        self.assertEqual(self.call("/api/reserve","POST",payload,{"Idempotency-Key":"direct-test-idempotency-0002"})[0],409)
+        self.assertEqual(self.call("/api/reservation?token="+r["access_token"])[0],200)
+        self.assertEqual(self.call("/api/reservation?token=bad")[0],404)
+        self.assertEqual(self.call("/api/admin/bookings/"+r["reference"],"PATCH",{"status":"cancelled"})[0],200)
+    def test_direct_disabled_and_methods(self):
+        self.assertEqual(self.call("/api/admin/settings","PATCH",{})[0],401)
+        self.configure_direct()
+        payload=self.quote()
+        payload["payment_method"]="card"
+        self.assertEqual(self.call("/api/reserve","POST",payload,{"Idempotency-Key":"direct-test-payment-00001"})[0],400)
+        payload["payment_method"]="arrival"
+        self.assertEqual(self.call("/api/admin/settings","PATCH",{"direct_enabled":False})[0],200)
+        self.assertEqual(self.call("/api/reserve","POST",payload,{"Idempotency-Key":"direct-test-payment-00001"})[0],503)
+    def test_bank_manual_payment(self):
+        self.configure_direct(["bank"])
+        payload=self.quote();payload["payment_method"]="bank"
+        with patch("server.send_mail"):
+            code,r,_=self.call("/api/reserve","POST",payload,{"Idempotency-Key":"direct-test-bank-00001"})
+        self.assertEqual(code,200)
+        self.assertFalse(r["paid"])
+        path="/api/admin/bookings/"+r["reference"]
+        self.assertEqual(self.call(path+"/record-payment","POST",{"reference":"TRN-test"})[0],200)
+        self.assertTrue(self.call("/api/reservation?token="+r["access_token"])[1]["paid"])
+        self.assertEqual(self.call(path,"PATCH",{"amount_cents":1})[0],409)
+    def test_card_expiration_releases_dates_only_after_signed_webhook(self):
+        self.configure_direct(["card"])
+        payload=self.quote();payload["payment_method"]="card"
+        with patch("server.stripe_request",return_value={"id":"cs_direct","url":"https://checkout.stripe.com/test"}) as stripe:
+            code,r,_=self.call("/api/reserve","POST",payload,{"Idempotency-Key":"direct-test-card-00001"})
+            self.assertEqual(code,200)
+            self.assertEqual(stripe.call_args.args[1]["payment_method_types[0]"],"card")
+        self.assertFalse(r["paid"])
+        self.assertEqual(len(self.call("/api/availability")[1]["unavailable"]),1)
+        event={"id":"evt_expired","type":"checkout.session.expired","data":{"object":{"id":"cs_direct","client_reference_id":r["reference"],"status":"expired"}}}
+        self.assertEqual(self.call("/api/stripe/webhook","POST",event)[0],400)
+        body=json.dumps(event).encode(); timestamp=str(int(time.time()))
+        signature=hmac.new(b"whsec_test",timestamp.encode()+b"."+body,hashlib.sha256).hexdigest()
+        self.assertEqual(self.call("/api/stripe/webhook","POST",body,{"Stripe-Signature":"t="+timestamp+",v1="+signature})[0],200)
+        self.assertEqual(self.call("/api/availability")[1]["unavailable"],[])
     def test_stripe_signature_amount_and_duplicate_event(self):
         _,p,_=self.create()
         bid=p["reference"]

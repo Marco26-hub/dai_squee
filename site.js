@@ -29,6 +29,13 @@ const today = dateString(new Date());
 document.querySelectorAll('input[type="date"]').forEach((input) => { input.min = today; });
 function datesValid(arrival, departure) { return arrival >= today && departure > arrival; }
 function openBooking(property) {
+  const query = new URLSearchParams();
+  const room = property || $('stayType')?.value || document.body.dataset.apartment;
+  if (room && room !== 'Tutti gli appartamenti') query.set('apartment', room);
+  for (const key of ['checkin','checkout','guests']) if ($(key)?.value) query.set(key, $(key).value.split(' ')[0]);
+  location.href = 'prenota.html?' + query;
+}
+function openRequest(property) {
   $('modalStayType').value = property || $('stayType')?.value || document.body.dataset.apartment || 'Tutti gli appartamenti';
   $('modalChannel').value = $('bookingChannel')?.value || 'Prenotazione diretta';
   if ($('checkin')) $('modalCheckin').value = $('checkin').value;
@@ -36,6 +43,7 @@ function openBooking(property) {
   if ($('guests')) $('modalGuests').value = $('guests').value.charAt(0);
   openDialog(bookingModal);
 }
+document.querySelectorAll('[data-request-info]').forEach(button => button.addEventListener('click', () => openRequest(document.getElementById('calendarApartment')?.value)));
 function status(message, state = '') {
   $('bookingStatus').textContent = message;
   $('bookingStatus').dataset.state = state;
@@ -129,6 +137,31 @@ document.querySelectorAll('img').forEach((img) => img.addEventListener('error', 
 setMenu(false);
 updateHeader();
 if (location.protocol !== 'file:') {
+  fetch('/api/apartment-photos', {cache:'no-store'}).then(response => response.ok ? response.json() : null).then(data => {
+    if(!data?.photos?.length) return;
+    const roomFiles={'Suite Max':'appartamento-suite-max.html','Michele':'appartamento-michele.html','Rosa e Romeo':'appartamento-rosa-e-romeo.html'};
+    for(const [room,file] of Object.entries(roomFiles)) {
+      const photos=data.photos.filter(photo=>photo.apartment===room), cover=photos.find(photo=>photo.role==='cover');
+      const setImage=img=>{if(img&&cover){img.src='/api/photos/'+cover.id;img.alt=cover.caption;}};
+      document.querySelectorAll('.residence-card').forEach(card=>{if(card.querySelector('[data-property]')?.dataset.property===room)setImage(card.querySelector('img'));});
+      document.querySelectorAll('.related-grid a').forEach(link=>{if(link.getAttribute('href')===file)setImage(link.querySelector('img'));});
+      if(document.body.dataset.apartment!==room||!photos.length)continue;
+      setImage(document.querySelector('.room-cover img'));
+      const original=[...document.querySelectorAll('.room-gallery')];
+      const section=document.createElement('section');section.className='room-gallery';
+      const title=document.createElement('h2');title.textContent='Gli spazi di '+room;section.append(title);
+      const grid=document.createElement('div');grid.className='gallery-grid';section.append(grid);
+      for(const photo of photos) {
+        const figure=document.createElement('figure'),link=document.createElement('a'),img=document.createElement('img'),caption=document.createElement('figcaption');
+        link.className='photo-frame';link.href='/api/photos/'+photo.id;link.target='_blank';link.rel='noopener';img.src=link.href;img.alt=photo.caption;img.loading='lazy';caption.textContent=photo.caption;
+        link.append(img);figure.append(link,caption);grid.append(figure);
+      }
+      if(original.length){original[0].before(section);original.forEach(element=>element.hidden=true);}
+      else document.querySelector('main').append(section);
+    }
+  }).catch(()=>{
+    // Original photographs stay visible if the managed gallery cannot be loaded.
+  });
   fetch('/api/config').then(response => {
     if (!response.ok) return null;
     return response.json();

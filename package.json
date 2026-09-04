@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "check": "node --check site.js && node --check admin.js",
+    "check": "node --check site.js && node --check admin.js && node --check booking.js",
     "test": "python3 -m unittest discover -s tests -v"
   },
   "engines": { "node": ">=20" }

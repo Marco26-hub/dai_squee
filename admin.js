@@ -67,15 +67,19 @@ async function openDetail(id) {
   form.elements.status.value=b.status;
   form.elements.amount.value=b.amount_cents==null?'':(b.amount_cents/100).toFixed(2);
   form.elements.notes.value=b.notes||'';
-  ['apartment','status','amount'].forEach(name=>form.elements[name].disabled=Boolean(b.checkout_id));
+  form.elements.checkin.value=b.checkin; form.elements.checkout.value=b.checkout;
+  $('manualPaymentRow').hidden=!['arrival','bank'].includes(b.payment_method)||Boolean(b.paid_at)||b.status!=='confirmed';
+  $('acceptedTerms').textContent=b.accepted_terms?'Condizioni accettate: '+JSON.parse(b.accepted_terms).terms:'';
+  ['apartment','status','amount','checkin','checkout'].forEach(name=>form.elements[name].disabled=Boolean(b.checkout_id||b.paid_at));
   $('paymentState').textContent=b.paid_at?'Pagamento verificato il '+new Date(b.paid_at).toLocaleString('it-IT'):b.checkout_id?'Link di pagamento creato. In attesa di pagamento verificato.':'Pagamento non richiesto.';
+  if(b.payment_method) $('paymentState').textContent+=' Modalità: '+({arrival:"all'arrivo",bank:'bonifico',card:'carta'}[b.payment_method]);
   $('paymentLink').hidden=!b.checkout_url;
   if(b.checkout_url) $('paymentLink').href=b.checkout_url;
   $('createPayment').disabled=b.status!=='confirmed'||Boolean(b.paid_at);
   $('sendPayment').disabled=!b.checkout_url||Boolean(b.paid_at);
   $('syncPayment').disabled=!b.checkout_id;
   $('expirePayment').disabled=!b.checkout_id||Boolean(b.paid_at);
-  $('sendConfirmation').disabled=b.status!=='confirmed';
+  $('sendConfirmation').disabled=b.status!=='confirmed'||(b.payment_method==='card'&&!b.paid_at);
   $('sendInvoice').disabled=!b.has_invoice||!b.email;
   $('downloadInvoice').hidden=!b.has_invoice;
   $('downloadInvoice').href='/api/admin/bookings/'+b.id+'/invoice';
@@ -88,7 +92,7 @@ async function openDetail(id) {
 }
 async function loadSettings() {
   const conf=await api('settings'), form=$('settingsForm');
-  for(const [key,value] of Object.entries(conf)) if(form.elements.namedItem(key)) form.elements.namedItem(key).value=value??'';
+  for(const [key,value] of Object.entries(conf)) if(form.elements.namedItem(key)) form.elements.namedItem(key).type==='checkbox' ? form.elements.namedItem(key).checked=Boolean(value) : form.elements.namedItem(key).value=value??'';
   for(const key of ['stripe_secret','stripe_webhook_secret','smtp_password']) {
     form.elements[key].value='';
     form.elements[key].placeholder=conf.configured[key]?'Configurato: lasciare vuoto per mantenere':'Non configurato';
@@ -96,6 +100,10 @@ async function loadSettings() {
   form.elements.rate_max.value=conf.rates['Suite Max']??'';
   form.elements.rate_michele.value=conf.rates.Michele??'';
   form.elements.rate_rosa.value=conf.rates['Rosa e Romeo']??'';
+  form.elements.capacity_max.value=conf.capacities['Suite Max'];
+  form.elements.capacity_michele.value=conf.capacities.Michele;
+  form.elements.capacity_rosa.value=conf.capacities['Rosa e Romeo'];
+  for(const method of ['arrival','card','bank']) form.elements['pay_'+method].checked=conf.payment_methods.includes(method);
   $('storageStatus').textContent=conf.storage;
   $('paymentMode').textContent=conf.payment_mode;
   $('webhookUrl').textContent=(conf.site_url||location.origin)+'/api/stripe/webhook';
@@ -117,6 +125,7 @@ document.querySelectorAll('[data-tab]').forEach(button=>button.addEventListener(
   button.setAttribute('aria-current','page');
   notice('');
   if(button.dataset.tab==='settings') await loadSettings();
+  if(button.dataset.tab==='photos') await loadPhotos();
 })));
 $('refresh').addEventListener('click',event=>run(event.target,async()=>{await refresh();notice('Elenco aggiornato.');}));
 $('search').addEventListener('input',renderBookings);
@@ -132,7 +141,7 @@ $('detailForm').addEventListener('submit',event=>{
   event.preventDefault();
   run(event.submitter,async()=>{
     const f=event.target.elements;
-    await api('bookings/'+selected.id,'PATCH',{apartment:f.apartment.value,status:f.status.value,amount_cents:f.amount.value===''?null:Math.round(Number(f.amount.value)*100),notes:f.notes.value});
+    await api('bookings/'+selected.id,'PATCH',{apartment:f.apartment.value,status:f.status.value,amount_cents:f.amount.value===''?null:Math.round(Number(f.amount.value)*100),notes:f.notes.value,checkin:f.checkin.value,checkout:f.checkout.value});
     await refresh(); await openDetail(selected.id); notice('Prenotazione salvata.');
   });
 });
@@ -142,6 +151,12 @@ for(const [id,action] of [['createPayment','checkout'],['sendPayment','send-paym
     await refresh(); await openDetail(selected.id); notice(result.message||'Link di pagamento pronto.');
   }));
 }
+$('recordPayment').addEventListener('click',event=>run(event.target,async()=>{
+  const reference=$('manualPaymentReference').value.trim();
+  if(!reference) throw new Error('Inserire un riferimento dell’incasso verificato.');
+  await api('bookings/'+selected.id+'/record-payment','POST',{reference});
+  await refresh(); await openDetail(selected.id); notice('Incasso registrato.');
+}));
 $('uploadInvoice').addEventListener('click',event=>run(event.target,async()=>{
   const file=$('invoiceFile').files[0];
   if(!file||file.size>2*1024*1024||!file.name.toLowerCase().endsWith('.pdf')) throw new Error('Selezionare un PDF di massimo 2 MB.');
@@ -172,6 +187,9 @@ $('settingsForm').addEventListener('submit',event=>{
   run(event.submitter,async()=>{
     const values=Object.fromEntries(new FormData(event.target));
     values.smtp_port=Number(values.smtp_port);
+    values.direct_enabled=event.target.elements.direct_enabled.checked;
+    values.payment_methods=['arrival','card','bank'].filter(method=>event.target.elements['pay_'+method].checked);
+    values.capacities={'Suite Max':Number(values.capacity_max),'Michele':Number(values.capacity_michele),'Rosa e Romeo':Number(values.capacity_rosa)};
     values.rates={'Suite Max':values.rate_max?Number(values.rate_max):null,'Michele':values.rate_michele?Number(values.rate_michele):null,'Rosa e Romeo':values.rate_rosa?Number(values.rate_rosa):null};
     const changePassword=Boolean(values.new_password);
     await api('settings','PATCH',values);
@@ -187,6 +205,33 @@ $('exportCsv').addEventListener('click',()=>{
   const rows=[['Riferimento','Nome','Email','Appartamento','Arrivo','Partenza','Stato','Importo EUR'],...bookings.map(b=>[b.id,b.name,b.email,b.apartment,b.checkin,b.checkout,labels[b.status],b.amount_cents==null?'':b.amount_cents/100])];
   const blob=new Blob(['\ufeff'+rows.map(row=>row.map(protect).join(';')).join('\r\n')],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='dai-squee-prenotazioni.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+async function loadPhotos() {
+  const data=await api('photos');
+  const photos=data.photos.filter(p=>p.apartment===$('photoApartment').value);
+  $('photoGrid').innerHTML=photos.map(p=>'<article data-photo="'+p.id+'"><img src="/api/photos/'+p.id+'" alt="'+esc(p.caption)+'" /><label>Descrizione<input data-caption value="'+esc(p.caption)+'" maxlength="240" /></label><p>'+(p.role==='cover'?'Copertina':'Galleria')+'</p><div class="action-row"><button data-photo-action="caption" title="Salva descrizione" aria-label="Salva descrizione">Salva</button><button data-photo-action="cover">Usa come copertina</button><button data-photo-action="remove" title="Rimuovi foto" aria-label="Rimuovi foto">×</button></div></article>').join('')||'<p>Nessuna foto personalizzata. Il sito mostra le immagini originali.</p>';
+}
+$('photoApartment').addEventListener('change',()=>run(null,loadPhotos));
+$('photoForm').addEventListener('submit',event=>{
+  event.preventDefault();
+  run(event.submitter,async()=>{
+    const file=$('photoFile').files[0];
+    if(!file||file.size>3*1024*1024||!['image/jpeg','image/png','image/webp'].includes(file.type)) throw new Error('Selezionare un JPG, PNG o WebP di massimo 3 MB.');
+    const bitmap=await createImageBitmap(file);bitmap.close();
+    const bytes=new Uint8Array(await file.arrayBuffer());let binary='';
+    for(let i=0;i<bytes.length;i+=8192) binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+    const data=Object.fromEntries(new FormData(event.target));delete data.image;data.image=btoa(binary);
+    await api('photos','POST',data);$('photoFile').value='';await loadPhotos();notice('Foto pubblicata sul sito.');
+  });
+});
+$('photoGrid').addEventListener('click',event=>{
+  const button=event.target.closest('[data-photo-action]');if(!button)return;
+  const item=button.closest('[data-photo]'), action=button.dataset.photoAction;
+  if(action==='remove'&&!confirm('Rimuovere questa foto dal sito?'))return;
+  run(button,async()=>{
+    const payload=action==='remove'?{remove:true}:action==='cover'?{role:'cover'}:{caption:item.querySelector('[data-caption]').value};
+    await api('photos/'+item.dataset.photo,'PATCH',payload);await loadPhotos();notice('Foto aggiornata.');
+  });
 });
 (async()=>{
   try { const result=await api('session'); csrf=result.csrf; showApp(); await refresh(); }
