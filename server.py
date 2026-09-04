@@ -24,6 +24,8 @@ from urllib.error import HTTPError, URLError
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("DAISQUE_DATA_DIR", str(ROOT / ".local-data")))
 ROOMS = ("Suite Max", "Michele", "Rosa e Romeo")
+ROOM_SLUGS = dict(zip(("suite-max", "michele", "rosa-e-romeo"), ROOMS))
+CHANNELS = ("booking", "airbnb")
 SECRETS = ("stripe_secret", "stripe_webhook_secret", "smtp_password")
 DEFAULTS = {
     "business_name": "Dai Squee", "email": "info@daisquee.it", "phone": "+39 349 4454604",
@@ -98,7 +100,15 @@ def init():
         CREATE TABLE IF NOT EXISTS apartment_photos (id TEXT PRIMARY KEY, apartment TEXT, role TEXT, caption TEXT, mime TEXT, data TEXT, created_at TEXT);
         CREATE TABLE IF NOT EXISTS photo_translations (photo_id TEXT PRIMARY KEY, caption_en TEXT);
         CREATE TABLE IF NOT EXISTS booking_languages (booking_id TEXT PRIMARY KEY, language TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS channel_connections (
+          apartment TEXT NOT NULL, channel TEXT NOT NULL, listing_id TEXT NOT NULL DEFAULT '',
+          import_url TEXT NOT NULL DEFAULT '', updated_at TEXT, version INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(apartment,channel));
+        CREATE TABLE IF NOT EXISTS calendar_exports (apartment TEXT PRIMARY KEY, token TEXT UNIQUE, updated_at TEXT);
         """)
+        for room in ROOMS:
+            for channel in CHANNELS:
+                conn.execute("INSERT INTO channel_connections(apartment,channel) VALUES (?,?) ON CONFLICT(apartment,channel) DO NOTHING", (room,channel))
         for key, value in DEFAULTS.items():
             conn.execute("INSERT INTO settings VALUES (?,?) ON CONFLICT(key) DO NOTHING", (key, json.dumps(value)))
         if not conn.execute("SELECT 1 FROM settings WHERE key='password_hash'").fetchone():
@@ -160,6 +170,61 @@ def booking_language(bid):
             return row["language"]
         direct = conn.execute("SELECT terms FROM direct_details WHERE booking_id=?",(bid,)).fetchone()
     return json.loads(direct["terms"]).get("language", "it") if direct else "it"
+
+def validate_channel_url(value, channel):
+    if not isinstance(value,str) or len(value)>2048 or any(ord(c)<33 for c in value):
+        raise ApiError(400,"Link calendario non valido.")
+    if not value:
+        return ""
+    try:
+        parsed = urlparse(value)
+        host = (parsed.hostname or "").lower()
+        base = "booking.com" if channel == "booking" else "airbnb.com"
+        valid_host = host == base or host.endswith("."+base)
+        if parsed.scheme != "https" or not valid_host or parsed.port not in (None,443) or parsed.username or parsed.password or parsed.fragment or parsed.path in ("","/"):
+            raise ValueError()
+    except ValueError:
+        raise ApiError(400,"Inserire il link HTTPS del calendario esportato dal portale, senza credenziali personali.")
+    return parsed._replace(netloc=host).geturl()
+
+def channel_manager_config(conn):
+    row = conn.execute("SELECT value FROM settings WHERE key='channel_manager_draft'").fetchone()
+    return json.loads(row["value"]) if row else {"provider":"","account_ref":"","mappings":{room:"" for room in ROOMS},"version":0}
+
+def channels_state():
+    with db() as conn:
+        connections = [dict(row) for row in conn.execute("SELECT * FROM channel_connections ORDER BY apartment,channel")]
+        exports = {row["apartment"]:dict(row) for row in conn.execute("SELECT * FROM calendar_exports")}
+        manager = channel_manager_config(conn)
+    for row in connections:
+        row["import_configured"] = bool(row.pop("import_url"))
+        row["status"] = "prepared" if row["import_configured"] or row["listing_id"] else "not_configured"
+        row["last_sync"] = None
+    base = settings()["site_url"].rstrip("/")
+    return {"connections":connections,"exports":[{"apartment":room,"active":bool(exports.get(room,{}).get("token")),"url":base+"/api/calendar/"+exports[room]["token"]+".ics" if base and exports.get(room,{}).get("token") else ""} for room in ROOMS],
+            "manager":manager,"import_active":False,"api_active":False,"site_url_configured":base.startswith("https://")}
+
+def calendar_export(token):
+    from icalendar import Calendar, Event
+    with db() as conn:
+        export = conn.execute("SELECT apartment FROM calendar_exports WHERE token=?",(token,)).fetchone()
+        if not export:
+            raise ApiError(404,"Calendario non disponibile.")
+        rows = [dict(row) for row in conn.execute("SELECT id,checkin,checkout,updated_at FROM bookings WHERE apartment=? AND status IN ('confirmed','blocked') AND checkout>? ORDER BY checkin,id",(export["apartment"],date.today().isoformat()))]
+    calendar = Calendar()
+    calendar.add("prodid","-//Dai Squee//Property availability//EN")
+    calendar.add("version","2.0")
+    calendar.add("calscale","GREGORIAN")
+    for row in rows:
+        event = Event()
+        event.add("uid",hashlib.sha256(("daisquee-calendar:"+row["id"]).encode()).hexdigest()+"@daisquee")
+        event.add("dtstamp",datetime.fromisoformat(row["updated_at"]))
+        event.add("dtstart",date.fromisoformat(row["checkin"]))
+        event.add("dtend",date.fromisoformat(row["checkout"]))
+        event.add("summary","Unavailable")
+        event.add("transp","OPAQUE")
+        calendar.add_component(event)
+    return calendar.to_ical()
 
 def quote_signature(quote, expires, conf):
     message = json.dumps([quote, expires], sort_keys=True, separators=(",", ":"))
@@ -419,6 +484,17 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
     def api(self, path):
         method = self.command
+        export_match = re.fullmatch(r"/api/calendar/([A-Za-z0-9_-]{43})\.ics",path)
+        if export_match and method == "GET":
+            body = calendar_export(export_match.group(1))
+            self.send_response(200)
+            self.send_header("Content-Type","text/calendar; charset=utf-8")
+            self.send_header("Cache-Control","no-store")
+            self.send_header("X-Robots-Tag","noindex, nofollow")
+            self.send_header("Content-Disposition",'attachment; filename="availability.ics"')
+            self.send_header("Content-Length",str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
         if path == "/api/apartment-photos" and method == "GET":
             with db() as conn:
                 rows = [dict(r) for r in conn.execute("SELECT p.id,p.apartment,p.role,p.caption,t.caption_en FROM apartment_photos p LEFT JOIN photo_translations t ON t.photo_id=p.id ORDER BY p.created_at,p.id")]
@@ -548,6 +624,8 @@ class Handler(SimpleHTTPRequestHandler):
         if not path.startswith("/api/admin/"):
             raise ApiError(404, "Risorsa non trovata.")
         session = self.session(method != "GET")
+        if path == "/api/admin/channels" or path.startswith("/api/admin/channels/"):
+            return self.manage_channels(path,method)
         if path == "/api/admin/session" and method == "GET":
             return self.response(200, {"csrf":session["csrf"]})
         if path == "/api/admin/logout" and method == "POST":
@@ -720,6 +798,71 @@ class Handler(SimpleHTTPRequestHandler):
         output["storage"] = "PostgreSQL persistente" if DATABASE_URL else "SQLite locale"
         output["payment_mode"] = "live" if conf["stripe_secret"].startswith("sk_live_") else ("test" if conf["stripe_secret"] else "non configurato")
         return self.response(200,output)
+    def manage_channels(self, path, method):
+        if path == "/api/admin/channels" and method == "GET":
+            return self.response(200,channels_state())
+        match = re.fullmatch(r"/api/admin/channels/(suite-max|michele|rosa-e-romeo)/(booking|airbnb)",path)
+        if match and method == "PATCH":
+            room,channel = ROOM_SLUGS[match.group(1)],match.group(2)
+            p = self.payload()
+            listing = text_value(p,"listing_id",120)
+            incoming = text_value(p,"import_url",2048)
+            if p.get("clear_import",False) not in (True,False):
+                raise ApiError(400,"Richiesta non valida.")
+            if p.get("clear_import") and incoming:
+                raise ApiError(400,"Scegliere se sostituire o rimuovere il calendario.")
+            if incoming:
+                incoming = validate_channel_url(incoming,channel)
+            with db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute("SELECT * FROM channel_connections WHERE apartment=? AND channel=?",(room,channel)).fetchone()
+                if type(p.get("version")) is not int or p["version"] != row["version"]:
+                    raise ApiError(409,"Configurazione modificata: ricaricare i collegamenti prima di salvare.")
+                feed = "" if p.get("clear_import") else incoming or row["import_url"]
+                if feed and conn.execute("SELECT 1 FROM channel_connections WHERE import_url=? AND apartment!=?",(feed,room)).fetchone():
+                    raise ApiError(409,"Questo calendario e' gia' associato a un altro appartamento.")
+                conn.execute("UPDATE channel_connections SET listing_id=?,import_url=?,updated_at=?,version=version+1 WHERE apartment=? AND channel=?",(listing,feed,now(),room,channel))
+                audit(conn,None,"Predisposizione portale aggiornata: "+channel+" / "+room)
+            return self.response(200,channels_state())
+        if path == "/api/admin/channels/manager" and method == "PATCH":
+            p = self.payload()
+            provider = text_value(p,"provider",100)
+            account = text_value(p,"account_ref",120)
+            mappings = p.get("mappings")
+            if not isinstance(mappings,dict) or set(mappings)!=set(ROOMS) or any(not isinstance(v,str) or len(v)>120 or any(ord(c)<32 for c in v) for v in mappings.values()):
+                raise ApiError(400,"Controllare gli ID alloggio del channel manager.")
+            clean = {room:mappings[room].strip() for room in ROOMS}
+            ids = [v for v in clean.values() if v]
+            if len(ids)!=len(set(ids)):
+                raise ApiError(400,"Gli ID delle tre unita' devono essere distinti.")
+            with db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                previous = channel_manager_config(conn)
+                if type(p.get("version")) is not int or p["version"]!=previous["version"]:
+                    raise ApiError(409,"Configurazione modificata: ricaricare i collegamenti prima di salvare.")
+                value = {"provider":provider,"account_ref":account,"mappings":clean,"version":previous["version"]+1}
+                conn.execute("INSERT INTO settings VALUES ('channel_manager_draft',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(json.dumps(value),))
+                audit(conn,None,"Predisposizione channel manager aggiornata; API non attiva")
+            return self.response(200,channels_state())
+        match = re.fullmatch(r"/api/admin/channels/exports/(suite-max|michele|rosa-e-romeo)",path)
+        if match and method == "POST":
+            p,room = self.payload(),ROOM_SLUGS[match.group(1)]
+            action = p.get("action")
+            if action not in ("create","rotate","revoke"):
+                raise ApiError(400,"Operazione calendario non valida.")
+            if action!="revoke" and not settings()["site_url"].startswith("https://"):
+                raise ApiError(400,"Configurare il dominio HTTPS in Impostazioni prima di creare il link.")
+            with db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                existing = conn.execute("SELECT token FROM calendar_exports WHERE apartment=?",(room,)).fetchone()
+                if action=="revoke":
+                    conn.execute("DELETE FROM calendar_exports WHERE apartment=?",(room,))
+                elif action=="rotate" or not existing:
+                    conn.execute("INSERT INTO calendar_exports VALUES (?,?,?) ON CONFLICT(apartment) DO UPDATE SET token=excluded.token,updated_at=excluded.updated_at",(room,secrets.token_urlsafe(32),now()))
+                audit(conn,None,"Link export calendario: "+action+" / "+room)
+            return self.response(200,channels_state())
+        raise ApiError(405,"Operazione canali non consentita.")
+
     def manage_booking(self, bid, action, method):
         if action == "events" and method == "GET":
             with db() as conn:

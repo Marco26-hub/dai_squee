@@ -35,7 +35,8 @@ try{
  bid=(await response.json()).reference;
  await page.locator('#bookingStatus[data-state="success"]').waitFor();
  results.publicEnquiry='passed';
- const password=(await readFile('.local-data/admin-access.txt','utf8')).split('Password: ')[1].split('\n')[0];
+ const credentials=await readFile('.local-data/production-admin-access.txt','utf8').catch(()=>readFile('.local-data/admin-access.txt','utf8'));
+ const password=credentials.split('Password: ')[1].split('\n')[0];
  await admin.goto(base+'/admin.html');
  await admin.locator('#loginForm [name="password"]').fill(password);
  await admin.locator('#loginForm button').click();

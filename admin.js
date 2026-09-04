@@ -126,6 +126,7 @@ document.querySelectorAll('[data-tab]').forEach(button=>button.addEventListener(
   notice('');
   if(button.dataset.tab==='settings') await loadSettings();
   if(button.dataset.tab==='photos') await loadPhotos();
+  if(button.dataset.tab==='channels') await loadChannels();
 })));
 $('refresh').addEventListener('click',event=>run(event.target,async()=>{await refresh();notice('Elenco aggiornato.');}));
 $('search').addEventListener('input',renderBookings);
@@ -206,6 +207,65 @@ $('exportCsv').addEventListener('click',()=>{
   const blob=new Blob(['\ufeff'+rows.map(row=>row.map(protect).join(';')).join('\r\n')],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='dai-squee-prenotazioni.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
+const channelRooms = {'suite-max':'Suite Max','michele':'Michele','rosa-e-romeo':'Rosa e Romeo'};
+let channelConfig = null, channelManagerVersion = 0;
+async function loadChannels() {
+  channelConfig = await api('channels');
+  renderChannels();
+  const form=$('channelManagerForm'), manager=channelConfig.manager;
+  channelManagerVersion=manager.version;
+  form.elements.provider.value=manager.provider;
+  form.elements.account_ref.value=manager.account_ref;
+  for(const [slug,room] of Object.entries(channelRooms))form.elements[slug].value=manager.mappings[room];
+}
+function renderChannels() {
+  if(!channelConfig)return;
+  const slug=$('channelApartment').value, room=channelRooms[slug];
+  $('channelConnections').innerHTML=channelConfig.connections.filter(c=>c.apartment===room).map(c=>{
+    const name=c.channel==='booking'?'Booking.com':'Airbnb';
+    return '<form data-channel="'+c.channel+'"><fieldset><legend>'+name+'</legend><div class="connection-heading"><span class="badge '+(c.status==='prepared'?'pending':'')+'">'+(c.status==='prepared'?'Predisposto, importazione non attiva':'Non configurato')+'</span><span class="muted">Ultima sincronizzazione: mai</span></div><div class="fields"><label>ID annuncio / unita\'<input name="listing_id" value="'+esc(c.listing_id)+'" maxlength="120" autocomplete="off" /></label><label>Link calendario iCal del portale<input name="import_url" type="url" autocomplete="off" maxlength="2048" placeholder="'+(c.import_configured?'Salvato: lasciare vuoto per mantenere':'https://')+'" /></label></div><label class="check-label"><input name="clear_import" type="checkbox" '+(c.import_configured?'':'disabled')+' /> Rimuovi il calendario salvato</label><button class="primary" type="submit">Salva collegamento '+name+'</button></fieldset></form>';
+  }).join('');
+  const item=channelConfig.exports.find(e=>e.apartment===room);
+  $('exportStatus').textContent=item.active?'Esportazione disponibile. Importazione dai portali non attiva.':'Nessun link di esportazione creato per questo appartamento.';
+  if(!channelConfig.site_url_configured)$('exportStatus').textContent+=' Configurare il dominio HTTPS in Impostazioni.';
+  $('exportUrl').value=item.url;
+  $('exportUrlLabel').hidden=!item.url;
+  $('createExport').hidden=item.active;
+  $('createExport').disabled=!channelConfig.site_url_configured;
+  for(const id of ['copyExport','rotateExport','revokeExport'])$(id).hidden=!item.active;
+  $('copyExport').disabled=!item.url;
+}
+$('channelApartment').addEventListener('change',renderChannels);
+$('refreshChannels').addEventListener('click',event=>run(event.target,loadChannels));
+$('channelConnections').addEventListener('submit',event=>{
+  event.preventDefault();
+  run(event.submitter,async()=>{
+    const form=event.target,slug=$('channelApartment').value,room=channelRooms[slug],channel=form.dataset.channel;
+    const current=channelConfig.connections.find(c=>c.apartment===room&&c.channel===channel);
+    const data={listing_id:form.elements.listing_id.value,import_url:form.elements.import_url.value,clear_import:form.elements.clear_import.checked,version:current.version};
+    channelConfig=await api('channels/'+slug+'/'+channel,'PATCH',data);
+    renderChannels();notice('Predisposizione salvata. Nessuna importazione dai portali attivata.');
+  });
+});
+$('channelManagerForm').addEventListener('submit',event=>{
+  event.preventDefault();
+  run(event.submitter,async()=>{
+    const form=event.target;
+    await api('channels/manager','PATCH',{provider:form.elements.provider.value,account_ref:form.elements.account_ref.value,mappings:Object.fromEntries(Object.entries(channelRooms).map(([slug,room])=>[room,form.elements[slug].value])),version:channelManagerVersion});
+    await loadChannels();notice('Dati del gestionale salvati. Il connettore API non e\' ancora attivo.');
+  });
+});
+for(const [id,action] of [['createExport','create'],['rotateExport','rotate'],['revokeExport','revoke']]){
+  $(id).addEventListener('click',event=>run(event.target,async()=>{
+    if(action!=='create'&&!confirm(action==='rotate'?'Il vecchio link smettera\' di funzionare. Aggiornare anche i portali con il nuovo link. Continuare?':'Revocare il link? I portali non potranno piu\' leggere gli aggiornamenti di questo calendario.'))return;
+    channelConfig=await api('channels/exports/'+$('channelApartment').value,'POST',{action});
+    renderChannels();notice(action==='revoke'?'Link revocato. Verificare anche i calendari dei portali.':'Link iCal pronto. Contiene soltanto le occupazioni del sito.');
+  }));
+}
+$('copyExport').addEventListener('click',event=>run(event.target,async()=>{
+  try {await navigator.clipboard.writeText($('exportUrl').value);notice('Link iCal copiato. Condividerlo solo con i servizi autorizzati.');}
+  catch { $('exportUrl').focus();$('exportUrl').select();notice('Copia automatica non disponibile: il link e\' selezionato.',true); }
+}));
 async function loadPhotos() {
   const data=await api('photos');
   const photos=data.photos.filter(p=>p.apartment===$('photoApartment').value);

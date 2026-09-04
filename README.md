@@ -7,6 +7,9 @@ Sito statico con pagine appartamento, amministrazione privata, richieste di pren
 Richiede Python 3.9+ e Node 20+.
 
 ```sh
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 python3 server.py
 ```
 
@@ -38,6 +41,20 @@ Stripe: endpoint /api/stripe/webhook; eventi checkout.session.completed e checko
 Email: un invio viene registrato come accettato dal server SMTP soltanto dopo la sua risposta. Errori o esiti incerti sono visibili e auditati. Il PDF viene emesso dal gestionale della struttura; questo sito gestisce la copia di cortesia, non la trasmissione fiscale.
 
 Portali: i link configurati sono semplici collegamenti. Le API Booking/Airbnb non sono attive e non si sincronizzano inserendo le password degli account host. Vedere ANALISI-PORTALI-E-CONCORRENZA.md.
+
+### Predisposizione Booking e Airbnb
+
+La scheda **Collegamenti portali** contiene sei associazioni persistenti (tre appartamenti per due portali): ID annuncio e URL iCal privato. Gli URL salvati non sono restituiti dal backend; il campo vuoto li mantiene, la rimozione e' esplicita. Il salvataggio valida il formato HTTPS e il dominio, non contatta il portale e non certifica l'accesso al calendario. Le scritture richiedono sessione, CSRF e versione corrente del record.
+
+Per ogni appartamento si puo' creare un link iCal riservato, rigenerarlo o revocarlo. L'export usa `icalendar`, legge le occupazioni effettive del sito e non contiene dati ospite o pagamenti. Le cancellazioni scompaiono dal feed alla lettura successiva. Il token equivale a un'autorizzazione di lettura: condividerlo solo con servizi autorizzati. La revoca non elimina le copie gia' lette dai portali; occorre controllarle nelle loro extranet.
+
+L'esportazione e' **solo sito -> calendario esterno**. L'importazione Booking/Airbnb, i job periodici, la riconciliazione e gli adattatori API NON sono implementati o attivi. Non inserire nel portale un feed importato nuovamente nello stesso circuito senza una strategia anti-duplicazione. I dati del channel manager e i suoi ID unita' sono una bozza di configurazione, non una connessione.
+
+Prima di attivare l'importazione serviranno: account del titolare, feed reali, parser e convalida degli eventi, protezione SSRF sulle richieste in uscita, gestione delle ricorrenze, riconciliazione e cancellazioni sicure, rilevamento dei conflitti, stato di sincronizzazione verificabile e collaudo per ciascun appartamento. La vendita multicanale automatica resta da collaudare.
+
+Riferimenti: [Airbnb iCal](https://www.airbnb.com/help/article/99), [Booking Connections](https://developers.booking.com/connectivity/docs/connections-api/connections-overview).
+
+L'accesso locale e quello online possono avere password diverse. `.local-data/production-admin-access.txt`, quando presente, contiene il promemoria riservato dell'accesso online; entrambi i file di accesso sono esclusi da Git e Vercel.
 
 ## Dati e verifiche prima dell'uso
 

@@ -34,6 +34,9 @@ class BookingTest(unittest.TestCase):
         cls.temp.cleanup()
     def setUp(self):
         with server.db() as conn:
+            conn.execute("DELETE FROM calendar_exports")
+            conn.execute("UPDATE channel_connections SET listing_id='',import_url='',updated_at=NULL,version=0")
+            conn.execute("DELETE FROM settings WHERE key='channel_manager_draft'")
             for table in ("bookings","direct_details","apartment_photos","photo_translations","booking_languages","events","stripe_events","sessions","rate_limits"):
                 conn.execute("DELETE FROM "+table)
             for key,value in server.DEFAULTS.items():
@@ -287,6 +290,87 @@ class BookingTest(unittest.TestCase):
         self.call("/api/admin/photos/"+result["id"],"PATCH",{"remove":True})
         with server.db() as conn:
             self.assertIsNone(conn.execute("SELECT 1 FROM photo_translations WHERE photo_id=?",(result["id"],)).fetchone())
+
+    def test_channels_preparation_private_and_masked(self):
+        self.assertEqual(self.call("/api/admin/channels")[0],401)
+        self.login()
+        state=self.call("/api/admin/channels")[1]
+        self.assertEqual(len(state["connections"]),6)
+        self.assertFalse(state["import_active"])
+        self.assertFalse(state["api_active"])
+        with patch("server.urlopen") as network:
+            code,state,_=self.call("/api/admin/channels/suite-max/airbnb","PATCH",{"version":0,"listing_id":"room-123","import_url":"https://www.airbnb.com/calendar/ical/123.ics?s=secret"})
+            self.assertEqual(code,200)
+            network.assert_not_called()
+        self.assertNotIn("secret",json.dumps(state))
+        configured=next(c for c in state["connections"] if c["channel"]=="airbnb" and c["apartment"]=="Suite Max")
+        self.assertEqual(configured["status"],"prepared")
+        self.assertIsNone(configured["last_sync"])
+        self.assertTrue(configured["import_configured"])
+        self.assertEqual(self.call("/api/admin/channels/suite-max/airbnb","PATCH",{"version":0})[0],409)
+        self.assertEqual(self.call("/api/admin/channels/suite-max/airbnb","PATCH",{"version":1,"listing_id":"new","import_url":""})[0],200)
+        with server.db() as conn:
+            self.assertIn("secret",conn.execute("SELECT import_url FROM channel_connections WHERE apartment='Suite Max' AND channel='airbnb'").fetchone()["import_url"])
+        self.assertEqual(self.call("/api/admin/channels/suite-max/airbnb","PATCH",{"version":2,"clear_import":True})[0],200)
+
+    def test_channels_reject_wrong_urls_duplicates_and_csrf(self):
+        self.login()
+        path="/api/admin/channels/suite-max/booking"
+        for url in ["http://admin.booking.com/calendar/x","https://booking.com.evil.invalid/x.ics","https://127.0.0.1/calendar","https://user:pass@booking.com/x","https://booking.com:123/x","https://booking.com/","https://www.airbnb.com/x.ics"]:
+            self.assertEqual(self.call(path,"PATCH",{"version":0,"import_url":url})[0],400)
+        good={"version":0,"import_url":"https://ical.booking.com/v1/export/private"}
+        self.assertEqual(self.call(path,"PATCH",good,{"X-CSRF-Token":"wrong"})[0],403)
+        self.assertEqual(self.call(path,"PATCH",good)[0],200)
+        self.assertEqual(self.call("/api/admin/channels/michele/booking","PATCH",good)[0],409)
+        self.assertEqual(self.call("/api/admin/channels/michele/booking","PATCH",{"version":0,"import_url":good["import_url"],"clear_import":True})[0],400)
+
+    def test_manager_mapping_does_not_enable_api(self):
+        self.login()
+        payload={"provider":"Existing manager","account_ref":"property123","mappings":{r:"room"+str(i) for i,r in enumerate(server.ROOMS)},"version":0}
+        code,state,_=self.call("/api/admin/channels/manager","PATCH",payload)
+        self.assertEqual(code,200)
+        self.assertEqual(state["manager"]["provider"],"Existing manager")
+        self.assertFalse(state["api_active"])
+        self.assertEqual(self.call("/api/admin/channels/manager","PATCH",payload)[0],409)
+        payload.update(version=1,mappings={r:"same" for r in server.ROOMS})
+        self.assertEqual(self.call("/api/admin/channels/manager","PATCH",payload)[0],400)
+
+    def test_calendar_export_privacy_live_changes_and_revocation(self):
+        from icalendar import Calendar
+        _,request,_=self.create()
+        self.login()
+        path="/api/admin/channels/exports/suite-max"
+        self.assertEqual(self.call(path,"POST",{"action":"create"})[0],400)
+        self.call("/api/admin/settings","PATCH",{"site_url":"https://example.invalid"})
+        code,state,_=self.call(path,"POST",{"action":"create"})
+        self.assertEqual(code,200)
+        export=next(e for e in state["exports"] if e["apartment"]=="Suite Max")["url"]
+        relative=export.removeprefix("https://example.invalid")
+        self.assertEqual(self.call(path,"POST",{"action":"create"})[1],state)
+        self.cookie=""
+        code,body,headers=self.call(relative)
+        self.assertEqual(code,200)
+        self.assertEqual(headers["Cache-Control"],"no-store")
+        self.assertEqual(len(Calendar.from_ical(body).walk("VEVENT")),0)
+        self.login()
+        bid=request["reference"]
+        self.call("/api/admin/bookings/"+bid,"PATCH",{"status":"confirmed"})
+        body=self.call(relative)[1]
+        events=Calendar.from_ical(body).walk("VEVENT")
+        self.assertEqual(len(events),1)
+        self.assertEqual(events[0]["SUMMARY"],"Unavailable")
+        self.assertNotIn(b"Test Guest",body)
+        self.assertNotIn(b"test@example",body)
+        self.assertNotIn(bid.encode(),body)
+        self.assertEqual((events[0].decoded("DTEND")-events[0].decoded("DTSTART")).days,3)
+        self.call("/api/admin/bookings/"+bid,"PATCH",{"status":"cancelled"})
+        self.assertEqual(len(Calendar.from_ical(self.call(relative)[1]).walk("VEVENT")),0)
+        state=self.call(path,"POST",{"action":"rotate"})[1]
+        self.assertEqual(self.call(relative)[0],404)
+        updated=next(e for e in state["exports"] if e["apartment"]=="Suite Max")["url"].removeprefix("https://example.invalid")
+        self.assertEqual(self.call(updated)[0],200)
+        self.call(path,"POST",{"action":"revoke"})
+        self.assertEqual(self.call(updated)[0],404)
 
 if __name__=="__main__":
     unittest.main()

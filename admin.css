@@ -85,3 +85,10 @@ input[type="checkbox"] { width: 18px; height: 18px; }
 .admin-photo-grid article { border: 1px solid #d1dad4; padding: 16px; border-radius: 6px; }
 .admin-photo-grid img { width: 100%; aspect-ratio: 4/3; object-fit: cover; margin-bottom: 12px; }
 .admin-photo-grid .action-row { margin-top: 12px; }
+.channel-status { padding:18px 0; border-block:1px solid #c8d7e1; color:#254761; }
+.channel-status p { margin-bottom:0; }
+.channel-toolbar { max-width:420px; margin-top:24px; }
+.connection-heading { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:22px; }
+.export-settings { padding-block:20px 30px; border-top:1px solid #d4ded7; }
+#channelManagerForm .fields { margin-top:24px; }
+#channelConnections input[type="checkbox"] { flex-shrink:0; }
