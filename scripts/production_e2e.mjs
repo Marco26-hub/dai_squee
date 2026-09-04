@@ -1,0 +1,70 @@
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+import { readFile } from 'node:fs/promises';
+const base='https://dai-squee.vercel.app';
+const browser=await chromium.launch();
+const context=await browser.newContext();
+const page=await context.newPage();
+const admin=await context.newPage();
+let bid,csrf,cleaned=false;
+const results={};
+async function api(path,method='GET',payload){
+ const r=await context.request.fetch(base+'/api/'+path,{method,data:payload,headers:csrf?{'X-CSRF-Token':csrf}:{}});
+ const data=await r.json();
+ if(!r.ok())throw Error(path+': HTTP '+r.status());
+ return data;
+}
+try{
+ const unavailable=(await api('availability')).unavailable;
+ let date=new Date();date.setDate(date.getDate()+300);
+ const iso=d=>d.toISOString().slice(0,10);
+ while(unavailable.some(r=>r.apartment==='Suite Max'&&r.checkin<=iso(date)&&r.checkout>iso(date)))date.setDate(date.getDate()+1);
+ const arrival=iso(date);date.setDate(date.getDate()+1);const departure=iso(date);
+ await page.goto(base+'/en/book.html');
+ await page.locator('[data-request-info]').click();
+ await page.locator('#guestName').fill('TEST E2E - NON CLIENTE');
+ await page.locator('#guestEmail').fill('e2e@example.invalid');
+ await page.locator('#modalStayType').selectOption('Suite Max');
+ await page.locator('#modalCheckin').fill(arrival);
+ await page.locator('#modalCheckout').fill(departure);
+ await page.locator('#guestMessage').fill('Test tecnico autorizzato. Nessun soggiorno, incasso o invio email. Annullare al termine del test.');
+ await page.locator('#privacyConsent').check();
+ const submitted=page.waitForResponse(r=>r.url().endsWith('/api/bookings')&&r.request().method()==='POST');
+ await page.locator('#bookingForm [type="submit"]').click();
+ const response=await submitted;
+ if(response.status()!==201)throw Error('Public enquiry HTTP '+response.status());
+ bid=(await response.json()).reference;
+ await page.locator('#bookingStatus[data-state="success"]').waitFor();
+ results.publicEnquiry='passed';
+ const password=(await readFile('.local-data/admin-access.txt','utf8')).split('Password: ')[1].split('\n')[0];
+ await admin.goto(base+'/admin.html');
+ await admin.locator('#loginForm [name="password"]').fill(password);
+ await admin.locator('#loginForm button').click();
+ await admin.locator('#app').waitFor();
+ csrf=(await api('admin/session')).csrf;
+ await admin.locator('#search').fill(bid);
+ await admin.locator('[data-booking="'+bid+'"]').click();
+ await admin.locator('#detailForm [name="status"]').selectOption('confirmed');
+ await admin.locator('#detailForm [name="notes"]').fill('TEST E2E autorizzato, da annullare immediatamente dopo verifica disponibilita.');
+ const confirmed=admin.waitForResponse(r=>r.url().endsWith('/api/admin/bookings/'+bid)&&r.request().method()==='PATCH');
+ await admin.locator('#detailForm button').click();
+ if((await confirmed).status()!==200)throw Error('Admin confirmation failed');
+ const occupied=(await api('availability')).unavailable;
+ if(!occupied.some(r=>r.apartment==='Suite Max'&&r.checkin===arrival&&r.checkout===departure))throw Error('Confirmed stay missing from calendar');
+ results.adminConfirmationAndCalendar='passed';
+ const conflict=await context.request.post(base+'/api/bookings',{headers:{'Idempotency-Key':crypto.randomUUID(),'Accept-Language':'en'},data:{name:'TEST E2E - overlap',email:'e2e@example.invalid',apartment:'Suite Max',checkin:arrival,checkout:departure,guests:1,consent:true}});
+ if(conflict.status()!==409)throw Error('Conflict protection failed');
+ results.overbookingRejected='passed';
+ await api('admin/bookings/'+bid,'PATCH',{status:'cancelled',notes:'TEST E2E completato e annullato. Nessun soggiorno o pagamento.'});
+ cleaned=true;
+ const available=(await api('availability')).unavailable;
+ if(available.some(r=>r.apartment==='Suite Max'&&r.checkin===arrival&&r.checkout===departure))throw Error('Cancelled dates still blocked');
+ results.cancellationReleasesDates='passed';
+ const settings=await api('admin/settings');
+ results.readiness={direct_enabled:settings.direct_enabled,rates:settings.rates,payment_methods:settings.payment_methods,configured:settings.configured,termsIt:Boolean(settings.booking_terms),termsEn:Boolean(settings.booking_terms_en),smtp:Boolean(settings.smtp_host&&settings.smtp_from),storage:settings.storage};
+ results.testReference=bid;
+ results.testRecord='cancelled';
+ console.log(JSON.stringify(results,null,2));
+}finally{
+ if(bid&&!cleaned&&csrf){await api('admin/bookings/'+bid,'PATCH',{status:'cancelled',notes:'TEST E2E interrotto: record annullato dal cleanup.'});console.log('Test record cancelled during cleanup');}
+ await browser.close();
+}

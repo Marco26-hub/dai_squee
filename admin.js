@@ -209,7 +209,7 @@ $('exportCsv').addEventListener('click',()=>{
 async function loadPhotos() {
   const data=await api('photos');
   const photos=data.photos.filter(p=>p.apartment===$('photoApartment').value);
-  $('photoGrid').innerHTML=photos.map(p=>'<article data-photo="'+p.id+'"><img src="/api/photos/'+p.id+'" alt="'+esc(p.caption)+'" /><label>Descrizione<input data-caption value="'+esc(p.caption)+'" maxlength="240" /></label><p>'+(p.role==='cover'?'Copertina':'Galleria')+'</p><div class="action-row"><button data-photo-action="caption" title="Salva descrizione" aria-label="Salva descrizione">Salva</button><button data-photo-action="cover">Usa come copertina</button><button data-photo-action="remove" title="Rimuovi foto" aria-label="Rimuovi foto">×</button></div></article>').join('')||'<p>Nessuna foto personalizzata. Il sito mostra le immagini originali.</p>';
+  $('photoGrid').innerHTML=photos.map(p=>'<article data-photo="'+p.id+'"><img src="/api/photos/'+p.id+'" alt="'+esc(p.caption)+'" /><label>Descrizione<input data-caption value="'+esc(p.caption)+'" maxlength="240" /></label><label>Descrizione in inglese<input data-caption-en value="'+esc(p.caption_en||'')+'" maxlength="240" /></label><p>'+(p.role==='cover'?'Copertina':'Galleria')+'</p><div class="action-row"><button data-photo-action="caption" title="Salva descrizione" aria-label="Salva descrizione">Salva</button><button data-photo-action="cover">Usa come copertina</button><button data-photo-action="remove" title="Rimuovi foto" aria-label="Rimuovi foto">×</button></div></article>').join('')||'<p>Nessuna foto personalizzata. Il sito mostra le immagini originali.</p>';
 }
 $('photoApartment').addEventListener('change',()=>run(null,loadPhotos));
 $('photoForm').addEventListener('submit',event=>{
@@ -229,7 +229,7 @@ $('photoGrid').addEventListener('click',event=>{
   const item=button.closest('[data-photo]'), action=button.dataset.photoAction;
   if(action==='remove'&&!confirm('Rimuovere questa foto dal sito?'))return;
   run(button,async()=>{
-    const payload=action==='remove'?{remove:true}:action==='cover'?{role:'cover'}:{caption:item.querySelector('[data-caption]').value};
+    const payload=action==='remove'?{remove:true}:action==='cover'?{role:'cover'}:{caption:item.querySelector('[data-caption]').value,caption_en:item.querySelector('[data-caption-en]').value};
     await api('photos/'+item.dataset.photo,'PATCH',payload);await loadPhotos();notice('Foto aggiornata.');
   });
 });

@@ -5,5 +5,6 @@ __pycache__
 /scraped
 .venv
 tests
+scripts
 test-results
 public

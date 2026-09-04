@@ -34,7 +34,7 @@ class BookingTest(unittest.TestCase):
         cls.temp.cleanup()
     def setUp(self):
         with server.db() as conn:
-            for table in ("bookings","direct_details","apartment_photos","events","stripe_events","sessions","rate_limits"):
+            for table in ("bookings","direct_details","apartment_photos","photo_translations","booking_languages","events","stripe_events","sessions","rate_limits"):
                 conn.execute("DELETE FROM "+table)
             for key,value in server.DEFAULTS.items():
                 conn.execute("UPDATE settings SET value=? WHERE key=?",(json.dumps(value),key))
@@ -224,6 +224,69 @@ class BookingTest(unittest.TestCase):
         with server.db() as conn:
             self.assertIsNotNone(server.booking(conn,bid)["paid_at"])
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM stripe_events").fetchone()[0],1)
+
+    def test_english_quote_terms_and_signature(self):
+        self.configure_direct(["arrival","bank"])
+        payload = self.quote()
+        stay = {**payload,"language":"en"}
+        code,result,_ = self.call("/api/quote","POST",stay,{"Accept-Language":"en"})
+        self.assertEqual(code,503)
+        self.assertIn("English booking terms",result["error"])
+        self.assertEqual(self.call("/api/admin/settings","PATCH",{"booking_terms_en":"English conditions.\nCheck-in from 15:00."})[0],200)
+        code,result,_ = self.call("/api/quote","POST",stay)
+        self.assertEqual(code,200)
+        self.assertEqual(result["quote"]["language"],"en")
+        self.assertEqual(result["quote"]["methods"],["arrival"])
+        self.assertIn("English conditions",result["quote"]["terms"])
+        stay.update(expires=result["expires"],signature=result["signature"])
+        wrong = {**stay,"language":"it"}
+        self.assertEqual(self.call("/api/reserve","POST",wrong,{"Idempotency-Key":"english-tamper-0000000001"})[0],409)
+        with patch("server.send_mail") as mail:
+            code,reservation,_ = self.call("/api/reserve","POST",stay,{"Idempotency-Key":"english-booking-00000001"})
+            self.assertEqual(code,200)
+            self.assertIn("booking",mail.call_args.args[1])
+            self.assertIn("Payment: on arrival",mail.call_args.args[2])
+            self.assertEqual(server.booking_language(reservation["reference"]),"en")
+        with patch("server.send_mail") as mail:
+            self.call("/api/admin/bookings/"+reservation["reference"]+"/send-confirmation","POST",{})
+            self.assertIn("stay confirmation",mail.call_args.args[1])
+
+    def test_english_card_checkout_and_bank_instructions(self):
+        self.configure_direct(["bank","card"])
+        self.call("/api/admin/settings","PATCH",{"booking_terms_en":"English terms","bank_instructions_en":"Transfer within 48 hours"})
+        stay = {**self.quote(),"language":"en","payment_method":"card"}
+        _,quote,_ = self.call("/api/quote","POST",stay)
+        self.assertEqual(quote["quote"]["bank_instructions"],"Transfer within 48 hours")
+        stay.update(expires=quote["expires"],signature=quote["signature"])
+        with patch("server.stripe_request",return_value={"id":"cs_english","url":"https://checkout.stripe.com/mock"}) as stripe:
+            code,result,_ = self.call("/api/reserve","POST",stay,{"Idempotency-Key":"english-stripe-000000001"})
+            self.assertEqual(code,200)
+            params = stripe.call_args.args[1]
+            self.assertEqual(params["locale"],"en")
+            self.assertIn("/en/book.html?receipt=",params["success_url"])
+            self.assertEqual(params["cancel_url"],params["success_url"])
+
+    def test_english_error_and_pages(self):
+        code,result,_ = self.call("/api/quote","POST",{},{"Accept-Language":"en-GB"})
+        self.assertEqual(code,400)
+        self.assertEqual(result["error"],"Please select an apartment.")
+        self.assertEqual(self.call("/en/")[0],200)
+        self.assertEqual(self.call("/en/about.html")[0],200)
+        self.assertEqual(self.call("/translations/en.json")[0],404)
+        self.assertEqual(self.call("/en/../server.py")[0],404)
+        self.assertIn(b'lang="en"',self.call("/en/book.html")[1])
+
+    def test_english_photo_caption(self):
+        self.login()
+        payload = {"apartment":"Michele","role":"cover","caption":"La camera","caption_en":"The bedroom","image":base64.b64encode(b"\xff\xd8\xff"+b"0"*200).decode()}
+        code,result,_ = self.call("/api/admin/photos","POST",payload)
+        self.assertEqual(code,201)
+        self.assertEqual(self.call("/api/apartment-photos")[1]["photos"][0]["caption_en"],"The bedroom")
+        self.call("/api/admin/photos/"+result["id"],"PATCH",{"caption_en":"The living room"})
+        self.assertEqual(self.call("/api/apartment-photos")[1]["photos"][0]["caption_en"],"The living room")
+        self.call("/api/admin/photos/"+result["id"],"PATCH",{"remove":True})
+        with server.db() as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM photo_translations WHERE photo_id=?",(result["id"],)).fetchone())
 
 if __name__=="__main__":
     unittest.main()

@@ -5,7 +5,7 @@
   "outputDirectory": "public",
   "functions": {
     "api/index.py": {
-      "includeFiles": "server.py",
+      "includeFiles": "{server.py,translations/en.json}",
       "excludeFiles": "{assets/**,scraped/**,public/**,tests/**,.local-data/**,.env*}",
       "maxDuration": 60
     }
