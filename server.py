@@ -82,6 +82,9 @@ def init():
         DATA.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(DATA, 0o700)
     with db() as conn:
+        # Serialize schema initialization across concurrent serverless workers.
+        if DATABASE_URL:
+            conn.execute("SELECT pg_advisory_xact_lock(73462052)")
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, expires REAL, csrf TEXT);

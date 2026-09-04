@@ -294,6 +294,9 @@ $('photoGrid').addEventListener('click',event=>{
   });
 });
 (async()=>{
+  const loginButton=$('loginForm').querySelector('button');
+  loginButton.disabled=true;
   try { const result=await api('session'); csrf=result.csrf; showApp(); await refresh(); }
   catch(error) { if(!error.message.includes('Accedere')) notice(error.message,true); }
+  finally {loginButton.disabled=false;}
 })();
